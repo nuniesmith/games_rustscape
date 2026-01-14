@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>404 - Page Not Found | Rustscape</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(180deg, #1A140E 0%, #2B2117 50%, #1A140E 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #CCCCCC;
+            text-align: center;
+            padding: 20px;
+        }
+        .error-code {
+            font-size: 120px;
+            font-weight: bold;
+            color: #D4A84B;
+            text-shadow: 4px 4px 8px rgba(0, 0, 0, 0.5);
+            line-height: 1;
+            margin-bottom: 16px;
+        }
+        h1 {
+            font-size: 28px;
+            color: #D4A84B;
+            margin-bottom: 16px;
+        }
+        p {
+            font-size: 16px;
+            color: #999;
+            max-width: 400px;
+            line-height: 1.6;
+            margin-bottom: 32px;
+        }
+        .links {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        a {
+            display: inline-block;
+            padding: 12px 24px;
+            background: #D4A84B;
+            color: #1A140E;
+            text-decoration: none;
+            border-radius: 4px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+        a:hover {
+            background: #E5C77A;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(212, 168, 75, 0.3);
+        }
+        a.secondary {
+            background: transparent;
+            border: 2px solid #5C4A36;
+            color: #CCCCCC;
+        }
+        a.secondary:hover {
+            border-color: #D4A84B;
+            color: #D4A84B;
+            background: transparent;
+        }
+        .icon {
+            font-size: 60px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="icon">🗺️</div>
+    <div class="error-code">404</div>
+    <h1>Page Not Found</h1>
+    <p>Looks like you've wandered into the wilderness! The page you're looking for doesn't exist or has been moved.</p>
+    <div class="links">
+        <a href="/">Return Home</a>
+        <a href="/web-client/" class="secondary">Play Classic Client</a>
+        <a href="/kmp/" class="secondary">Play Modern Client</a>
+    </div>
+</body>
+</html>

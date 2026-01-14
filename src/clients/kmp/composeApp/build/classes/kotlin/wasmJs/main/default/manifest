@@ -1,0 +1,11 @@
+abi_version=1.201.0
+builtins_platform=WASM
+compiler_version=2.1.0
+depends=com.rustscape\:shared components.resources\:library components.ui-tooling-preview\:library org.jetbrains.compose.material3\:material3 org.jetbrains.compose.material\:material-ripple org.jetbrains.compose.foundation\:foundation org.jetbrains.compose.animation\:animation org.jetbrains.compose.animation\:animation-core org.jetbrains.kotlinx\:kotlinx-coroutines-core org.jetbrains.compose.material\:material-icons-core org.jetbrains.compose.foundation\:foundation-layout org.jetbrains.compose.ui\:ui org.jetbrains.kotlinx\:kotlinx-browser org.jetbrains.compose.runtime\:runtime-saveable kotlin org.jetbrains.compose.runtime\:runtime org.jetbrains.compose.ui\:ui-text org.jetbrains.compose.ui\:ui-graphics org.jetbrains.compose.ui\:ui-unit org.jetbrains.kotlinx\:atomicfu org.jetbrains.skiko\:skiko org.jetbrains.compose.ui\:ui-geometry org.jetbrains.compose.ui\:ui-util
+ir_signature_versions=1,2
+jsOutputName=rustscape-client-composeApp-wasm-js
+metadata_version=1.4.1
+serializedIrFileFingerprints=3fh4ac2p49cbu.6iaegjhkp47 1avmnkimvwciw.1hruyloaj2lm3 15pr83ukjqx77.ocaszeu4hkmj 5ljs5ncsd35y.9qu2jutzx6yx 2iv4jpww0mo0h.2nr5537j8ui3 4vhu27izv1ed.3th438ehk32ht ld577thplswk.1779ngx765cn4 j7vwupmwqur2.2s6fdjurj8ksw 1df0115sqdfy8.7bvzq4ayjngs
+serializedKlibFingerprint=29cop0szg9ppv.2stqsqyy8kkzb
+unique_name=com.rustscape\:composeApp
+wasm_targets=wasm-js

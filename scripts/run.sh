@@ -14,11 +14,14 @@
 #   clean     - Stop and remove all containers and volumes
 #   dev       - Start with dev tools (pgAdmin, Redis Commander)
 #   init      - Initialize/regenerate .env file
+#   client    - Build the KMP client (web/desktop)
+#   web       - Build and serve the web client only
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+KMP_DIR="$PROJECT_DIR/src/clients/kmp"
 
 cd "$PROJECT_DIR"
 
@@ -28,6 +31,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
 NC='\033[0m' # No Color
 
 log_info() {
@@ -48,6 +52,10 @@ log_error() {
 
 log_step() {
     echo -e "${CYAN}[STEP]${NC} $1"
+}
+
+log_client() {
+    echo -e "${MAGENTA}[CLIENT]${NC} $1"
 }
 
 print_banner() {
@@ -206,6 +214,12 @@ PGADMIN_PORT=5050
 REDIS_COMMANDER_PORT=8081
 
 # --------------------------------------------
+# KMP Client Build
+# --------------------------------------------
+KMP_BUILD_WEB=true
+KMP_BUILD_DESKTOP=false
+
+# --------------------------------------------
 # Timezone
 # --------------------------------------------
 TZ=America/New_York
@@ -237,6 +251,231 @@ ensure_env() {
     set -a
     source "$PROJECT_DIR/.env"
     set +a
+}
+
+# Check if Java/Gradle is available for KMP builds
+check_java() {
+    if ! command -v java &> /dev/null; then
+        log_error "Java is not installed. Required for KMP client builds."
+        log_info "Install Java 17+ to build the KMP client."
+        return 1
+    fi
+
+    local java_version=$(java -version 2>&1 | head -n 1 | cut -d'"' -f2 | cut -d'.' -f1)
+    if [ "$java_version" -lt 17 ] 2>/dev/null; then
+        log_warn "Java version $java_version detected. Java 17+ recommended."
+    fi
+
+    return 0
+}
+
+# Check if Gradle wrapper exists, download if needed
+ensure_gradle_wrapper() {
+    if [ ! -f "$KMP_DIR/gradlew" ]; then
+        log_warn "Gradle wrapper not found in KMP directory"
+        return 1
+    fi
+
+    if [ ! -f "$KMP_DIR/gradle/wrapper/gradle-wrapper.jar" ]; then
+        log_step "Downloading Gradle wrapper..."
+        cd "$KMP_DIR"
+
+        # Download gradle wrapper jar
+        local wrapper_url="https://services.gradle.org/distributions/gradle-8.10-bin.zip"
+        if command -v curl &> /dev/null; then
+            mkdir -p gradle/wrapper
+            curl -sL "https://raw.githubusercontent.com/gradle/gradle/v8.10.0/gradle/wrapper/gradle-wrapper.jar" -o gradle/wrapper/gradle-wrapper.jar 2>/dev/null || true
+        fi
+
+        cd "$PROJECT_DIR"
+    fi
+
+    # Make gradlew executable
+    chmod +x "$KMP_DIR/gradlew" 2>/dev/null || true
+
+    return 0
+}
+
+# Build KMP web client (WASM)
+build_kmp_web() {
+    log_client "Building KMP Web Client (WASM)..."
+
+    if ! check_java; then
+        return 1
+    fi
+
+    if ! ensure_gradle_wrapper; then
+        log_error "Could not set up Gradle wrapper"
+        return 1
+    fi
+
+    cd "$KMP_DIR"
+
+    log_step "Running Gradle wasmJsBrowserDistribution..."
+    ./gradlew :composeApp:wasmJsBrowserDistribution --no-daemon --warning-mode=summary || {
+        log_error "KMP web build failed"
+        cd "$PROJECT_DIR"
+        return 1
+    }
+
+    # Copy built files to nginx serving directory
+    local build_output="$KMP_DIR/composeApp/build/dist/wasmJs/productionExecutable"
+    local nginx_dest="$PROJECT_DIR/src/clients/web/dist-kmp"
+
+    if [ -d "$build_output" ]; then
+        log_step "Copying build output to web directory..."
+        mkdir -p "$nginx_dest"
+        cp -r "$build_output/"* "$nginx_dest/"
+        log_success "KMP web client built successfully!"
+        echo "  Output: $nginx_dest"
+    else
+        log_warn "Build output not found at $build_output"
+    fi
+
+    cd "$PROJECT_DIR"
+    return 0
+}
+
+# Build KMP desktop client
+build_kmp_desktop() {
+    local target="${1:-all}"
+
+    log_client "Building KMP Desktop Client..."
+
+    if ! check_java; then
+        return 1
+    fi
+
+    if ! ensure_gradle_wrapper; then
+        log_error "Could not set up Gradle wrapper"
+        return 1
+    fi
+
+    cd "$KMP_DIR"
+
+    case "$target" in
+        linux|tar)
+            log_step "Building Linux AppImage..."
+            ./gradlew :composeApp:packageAppImage --no-daemon || {
+                log_error "Linux build failed"
+                cd "$PROJECT_DIR"
+                return 1
+            }
+            log_step "Creating tar.gz distribution..."
+            ./gradlew :composeApp:packageLinuxTarGz --no-daemon || true
+            ;;
+        deb)
+            log_step "Building Debian package..."
+            ./gradlew :composeApp:packageDeb --no-daemon
+            ;;
+        rpm)
+            log_step "Building RPM package..."
+            ./gradlew :composeApp:packageRpm --no-daemon
+            ;;
+        windows|msi)
+            log_step "Building Windows installer..."
+            ./gradlew :composeApp:packageMsi --no-daemon
+            ;;
+        macos|dmg)
+            log_step "Building macOS bundle..."
+            ./gradlew :composeApp:packageDmg --no-daemon
+            ;;
+        all)
+            log_step "Building all desktop distributions..."
+            ./gradlew :composeApp:packageAppImage --no-daemon || true
+            ./gradlew :composeApp:packageLinuxTarGz --no-daemon || true
+            # Only build platform-specific on that platform
+            case "$(uname -s)" in
+                Linux*)
+                    ./gradlew :composeApp:packageDeb --no-daemon || true
+                    ;;
+                Darwin*)
+                    ./gradlew :composeApp:packageDmg --no-daemon || true
+                    ;;
+                MINGW*|CYGWIN*|MSYS*)
+                    ./gradlew :composeApp:packageMsi --no-daemon || true
+                    ;;
+            esac
+            ;;
+        *)
+            log_error "Unknown desktop target: $target"
+            log_info "Valid targets: linux, deb, rpm, windows, macos, all"
+            cd "$PROJECT_DIR"
+            return 1
+            ;;
+    esac
+
+    log_success "KMP desktop client built!"
+    echo "  Output: $KMP_DIR/composeApp/build/compose/binaries/"
+
+    cd "$PROJECT_DIR"
+    return 0
+}
+
+# Run KMP desktop client in development mode
+run_kmp_desktop() {
+    log_client "Running KMP Desktop Client..."
+
+    if ! check_java; then
+        return 1
+    fi
+
+    if ! ensure_gradle_wrapper; then
+        log_error "Could not set up Gradle wrapper"
+        return 1
+    fi
+
+    cd "$KMP_DIR"
+
+    log_step "Starting desktop application..."
+    ./gradlew :composeApp:run --no-daemon
+
+    cd "$PROJECT_DIR"
+}
+
+# Run KMP web client development server
+run_kmp_web_dev() {
+    log_client "Starting KMP Web Development Server..."
+
+    if ! check_java; then
+        return 1
+    fi
+
+    if ! ensure_gradle_wrapper; then
+        log_error "Could not set up Gradle wrapper"
+        return 1
+    fi
+
+    cd "$KMP_DIR"
+
+    log_step "Starting WASM development server..."
+    log_info "Press Ctrl+C to stop"
+    ./gradlew :composeApp:wasmJsBrowserDevelopmentRun --no-daemon --continuous
+
+    cd "$PROJECT_DIR"
+}
+
+# Build both TypeScript and KMP web clients
+build_all_web_clients() {
+    log_step "Building all web clients..."
+
+    # Build TypeScript client (existing)
+    if [ -f "$PROJECT_DIR/src/clients/web/package.json" ]; then
+        log_info "Building TypeScript web client..."
+        cd "$PROJECT_DIR/src/clients/web"
+        if command -v npm &> /dev/null; then
+            npm ci --silent 2>/dev/null || npm install --silent
+            npm run build
+        else
+            log_warn "npm not found, skipping TypeScript client build"
+        fi
+        cd "$PROJECT_DIR"
+    fi
+
+    # Build KMP client
+    build_kmp_web
+
+    log_success "All web clients built!"
 }
 
 wait_for_postgres() {
@@ -278,7 +517,14 @@ wait_for_redis() {
 }
 
 start_services() {
+    local skip_client_build="${1:-false}"
     ensure_env
+
+    # Build KMP web client if enabled
+    if [ "$skip_client_build" != "true" ] && [ "${KMP_BUILD_WEB:-true}" == "true" ]; then
+        log_info "Building KMP web client before starting services..."
+        build_kmp_web || log_warn "KMP build failed, continuing with existing files..."
+    fi
 
     log_info "Starting Rustscape server stack..."
 
@@ -296,6 +542,7 @@ start_services() {
     echo ""
     log_info "Services available at:"
     echo "  - Web Client:    http://localhost:${NGINX_HTTP_PORT:-8088}"
+    echo "  - KMP Client:    http://localhost:${NGINX_HTTP_PORT:-8088}/kmp/"
     echo "  - WebSocket:     ws://localhost:${NGINX_HTTP_PORT:-8088}/ws (proxied)"
     echo "  - Game TCP:      localhost:43597 (base), localhost:43598 (world 1)"
     echo "  - REST API:      http://localhost:${NGINX_HTTP_PORT:-8088}/api/v1"
@@ -315,6 +562,12 @@ start_services() {
 start_dev() {
     ensure_env
 
+    # Build KMP web client
+    if [ "${KMP_BUILD_WEB:-true}" == "true" ]; then
+        log_info "Building KMP web client..."
+        build_kmp_web || log_warn "KMP build failed, continuing with existing files..."
+    fi
+
     log_info "Starting Rustscape server stack with dev tools..."
 
     # Start infrastructure first
@@ -331,6 +584,7 @@ start_dev() {
     echo ""
     log_info "Services available at:"
     echo "  - Web Client:    http://localhost:${NGINX_HTTP_PORT:-8088}"
+    echo "  - KMP Client:    http://localhost:${NGINX_HTTP_PORT:-8088}/kmp/"
     echo "  - WebSocket:     ws://localhost:${NGINX_HTTP_PORT:-8088}/ws (proxied)"
     echo "  - Game TCP:      localhost:43597 (base), localhost:43598 (world 1)"
     echo "  - REST API:      http://localhost:${NGINX_HTTP_PORT:-8088}/api/v1"
@@ -370,6 +624,13 @@ show_status() {
 
 build_server() {
     ensure_env
+
+    # Build KMP clients if requested
+    if [ "${KMP_BUILD_WEB:-true}" == "true" ]; then
+        log_info "Building KMP web client..."
+        build_kmp_web || log_warn "KMP build failed, continuing..."
+    fi
+
     log_info "Building server images..."
     docker compose build server nginx
     log_success "Build complete"
@@ -397,26 +658,80 @@ init_env() {
     generate_env_file "$force"
 }
 
+# Client build commands
+client_command() {
+    local subcmd="${1:-help}"
+    shift 2>/dev/null || true
+
+    case "$subcmd" in
+        web)
+            build_kmp_web
+            ;;
+        desktop)
+            build_kmp_desktop "$@"
+            ;;
+        all)
+            build_kmp_web
+            build_kmp_desktop all
+            ;;
+        run)
+            run_kmp_desktop
+            ;;
+        dev)
+            run_kmp_web_dev
+            ;;
+        help|--help|-h)
+            echo "Client build commands:"
+            echo ""
+            echo "  client web              - Build KMP web client (WASM)"
+            echo "  client desktop [target] - Build KMP desktop client"
+            echo "                            Targets: linux, deb, rpm, windows, macos, all"
+            echo "  client all              - Build both web and desktop clients"
+            echo "  client run              - Run desktop client in dev mode"
+            echo "  client dev              - Run web client dev server with hot reload"
+            echo ""
+            ;;
+        *)
+            log_error "Unknown client command: $subcmd"
+            client_command help
+            return 1
+            ;;
+    esac
+}
+
 show_help() {
     echo "Usage: $0 [command] [options]"
     echo ""
-    echo "Commands:"
+    echo "Server Commands:"
     echo "  start         Start the server stack (default)"
     echo "  stop          Stop the server stack"
     echo "  restart       Restart the server stack"
     echo "  logs [svc]    View logs (optionally for specific service)"
     echo "  status        Show status of all services"
-    echo "  build         Rebuild the server images"
+    echo "  build         Rebuild the server images (includes KMP client)"
     echo "  clean         Stop and remove all containers and volumes"
     echo "  dev           Start with dev tools (pgAdmin, Redis Commander)"
     echo "  init [--force] Initialize/regenerate .env file"
-    echo "  help          Show this help message"
+    echo ""
+    echo "Client Commands:"
+    echo "  client web              - Build KMP web client (WASM)"
+    echo "  client desktop [target] - Build KMP desktop client"
+    echo "  client all              - Build all clients"
+    echo "  client run              - Run desktop client"
+    echo "  client dev              - Run web dev server"
+    echo ""
+    echo "Quick Commands:"
+    echo "  web           Build and start with KMP web client"
+    echo "  quick         Start without rebuilding clients"
     echo ""
     echo "Examples:"
-    echo "  $0                  # Start the server"
-    echo "  $0 dev              # Start with dev tools"
-    echo "  $0 logs server      # View server logs only"
-    echo "  $0 init --force     # Regenerate .env with new secrets"
+    echo "  $0                       # Start the server (builds KMP client)"
+    echo "  $0 quick                 # Start without building clients"
+    echo "  $0 dev                   # Start with dev tools"
+    echo "  $0 client web            # Build only the web client"
+    echo "  $0 client desktop linux  # Build Linux desktop client"
+    echo "  $0 logs server           # View server logs only"
+    echo "  $0 init --force          # Regenerate .env with new secrets"
     echo ""
 }
 
@@ -429,6 +744,9 @@ print_banner
 case "$COMMAND" in
     start)
         start_services
+        ;;
+    quick)
+        start_services true
         ;;
     stop)
         stop_services
@@ -453,6 +771,13 @@ case "$COMMAND" in
         ;;
     init)
         init_env "$@"
+        ;;
+    client)
+        client_command "$@"
+        ;;
+    web)
+        build_kmp_web
+        start_services true
         ;;
     help|--help|-h)
         show_help

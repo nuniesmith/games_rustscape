@@ -15,17 +15,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy Cargo files first for dependency caching
 COPY src/server/Cargo.toml src/server/Cargo.lock* ./
 
-# Create a dummy main.rs to build dependencies
-RUN mkdir -p src && \
+# Create dummy lib.rs and main.rs to build dependencies
+RUN mkdir -p src/bin && \
     echo "fn main() {}" > src/main.rs && \
+    echo "" > src/lib.rs && \
+    echo "fn main() {}" > src/bin/extract_sprites.rs && \
     cargo build --release && \
     rm -rf src
 
 # Copy actual source code
 COPY src/server/src ./src
 
-# Build the actual application
-RUN touch src/main.rs && cargo build --release
+# Build the actual application (touch lib.rs and main.rs to invalidate cached empty files)
+RUN touch src/lib.rs src/main.rs && cargo build --release
 
 ###############################
 # Stage 2: Runtime

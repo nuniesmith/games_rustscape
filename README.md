@@ -252,13 +252,6 @@ cargo test  # Run all tests
 - [x] Full game packet parsing (incoming/outgoing packet handlers)
 - [x] Player persistence (PostgreSQL save/load for skills, inventory, position)
 
-## Archive
-
-The `archive/` directory contains legacy Java implementations for reference:
-- Protocol details
-- Game logic
-- Database schemas
-
 ## License
 
 MIT License - See [LICENSE](LICENSE) for details.
