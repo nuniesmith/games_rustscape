@@ -3,21 +3,145 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RS2009 Web Client</title>
+    <title>Rustscape Web Client</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: #fff;
+        }
+
+        #game-container {
+            width: 100%;
+            max-width: 800px;
+            padding: 20px;
+        }
+
+        #login-container {
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 10px;
+            padding: 40px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            background: linear-gradient(90deg, #e94560, #ff6b6b);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 0.9em;
+            color: #aaa;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px 15px;
+            font-size: 1em;
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            border-radius: 5px;
+            background: rgba(255, 255, 255, 0.05);
+            color: #fff;
+            transition: border-color 0.3s, background 0.3s;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #e94560;
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        #login-button {
+            width: 100%;
+            padding: 15px;
+            font-size: 1.1em;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            border: none;
+            border-radius: 5px;
+            background: linear-gradient(90deg, #e94560, #ff6b6b);
+            color: #fff;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            margin-top: 10px;
+        }
+
+        #login-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(233, 69, 96, 0.4);
+        }
+
+        #login-button:active {
+            transform: translateY(0);
+        }
+
+        #game-canvas {
+            display: none;
+            width: 100%;
+            height: 600px;
+            background: #000;
+            border-radius: 10px;
+        }
+
+        #game-ui {
+            display: none;
+        }
+
+        #status {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 0.9em;
+            color: #666;
+        }
+
+        .version {
+            text-align: center;
+            margin-top: 15px;
+            font-size: 0.8em;
+            color: #555;
+        }
+    </style>
 </head>
 <body>
     <div id="game-container">
         <div id="login-container">
-            <h1>RS2009 Web Client</h1>
+            <h1>Rustscape</h1>
             <div class="form-group">
-                <label for="username">Username:</label>
-                <input type="text" id="username" name="username">
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username" autocomplete="username" placeholder="Enter your username">
             </div>
             <div class="form-group">
-                <label for="password">Password:</label>
-                <input type="password" id="password" name="password">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" autocomplete="current-password" placeholder="Enter your password">
             </div>
             <button id="login-button">Login</button>
+            <div id="status"></div>
+            <div class="version">Web Client v1.0.0</div>
         </div>
         <canvas id="game-canvas"></canvas>
         <div id="game-ui">
@@ -26,6 +150,6 @@
             <div id="skills-container"></div>
         </div>
     </div>
+    <script type="module" src="/src/index.ts"></script>
 </body>
 </html>
-

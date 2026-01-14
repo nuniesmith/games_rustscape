@@ -1,132 +1,160 @@
 services:
-  # Game server
-  app:
-    build:
-      context: .
-      dockerfile: ./docker/server/Dockerfile
-    container_name: "2009scape_app"
-    depends_on:
-      database:
-        condition: service_healthy
-    restart: unless-stopped
-    volumes:
-      - "2009scape_app_data:/app/2009scape/data"
-      - "2009scape_app_logs:/app/2009scape/logs"
-      # Mount SQL files for database initialization
-      - "./config/mysql/init:/docker-entrypoint-initdb.d:ro"
-    environment:
-      - TZ=America/New_York
-      - MYSQL_HOST=database
-      - MYSQL_USER=jordan
-      - MYSQL_PASSWORD=123456
-      - MYSQL_DATABASE=global
-      - JAVA_OPTS=-Xmx6G -Xms1G -XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200
-    ports:
-      - "43594-43596:43594-43596"
-      - "5555:5555"
-    networks:
-      - 2009scape_network
-    deploy:
-      resources:
-        limits:
-          cpus: '8'
-          memory: 8G
+    # Game server (Java)
+    app:
+        build:
+            context: .
+            dockerfile: ./docker/server/Dockerfile
+        container_name: "rustscape_app"
+        depends_on:
+            database:
+                condition: service_healthy
+        restart: unless-stopped
+        volumes:
+            - "rustscape_app_data:/app/rustscape/data"
+            - "rustscape_app_logs:/app/rustscape/logs"
+            - "./config/mysql/init:/docker-entrypoint-initdb.d:ro"
+        environment:
+            - TZ=America/New_York
+            - MYSQL_HOST=database
+            - MYSQL_USER=jordan
+            - MYSQL_PASSWORD=123456
+            - MYSQL_DATABASE=global
+            - JAVA_OPTS=-Xmx6G -Xms1G -XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200
+        ports:
+            - "43594:43594" # Base game port
+            - "43595:43595" # World 1 game port
+            - "43596:43596" # WebSocket port
+            - "5555:5555" # Management API
+        networks:
+            - rustscape_network
+        healthcheck:
+            test: ["CMD", "nc", "-z", "localhost", "43594"]
+            interval: 30s
+            timeout: 10s
+            start_period: 120s
+            retries: 5
+        deploy:
+            resources:
+                limits:
+                    cpus: "8"
+                    memory: 8G
 
-  # Database service
-  database:
-    image: mysql:8.0
-    container_name: "2009scape_db"
-    restart: always
-    ports:
-      - "3306:3306"
-    volumes:
-      - "2009scape_db:/var/lib/mysql"
-      - "./config/mysql/init:/docker-entrypoint-initdb.d:ro"
-    environment:
-      - TZ=America/New_York
-      - MYSQL_ROOT_PASSWORD=root
-      - MYSQL_USER=jordan
-      - MYSQL_PASSWORD=123456
-      - MYSQL_DATABASE=global
-      - MYSQL_ROOT_HOST=%
-    networks:
-      - 2009scape_network
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-ujordan", "-p123456"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 1G
-    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    # Database service
+    database:
+        image: mysql:8.0
+        container_name: "rustscape_db"
+        restart: always
+        ports:
+            - "3306:3306"
+        volumes:
+            - "rustscape_db:/var/lib/mysql"
+            - "./config/mysql/init:/docker-entrypoint-initdb.d:ro"
+        environment:
+            - TZ=America/New_York
+            - MYSQL_ROOT_PASSWORD=root
+            - MYSQL_USER=jordan
+            - MYSQL_PASSWORD=123456
+            - MYSQL_DATABASE=global
+            - MYSQL_ROOT_HOST=%
+        networks:
+            - rustscape_network
+        healthcheck:
+            test:
+                [
+                    "CMD",
+                    "mysqladmin",
+                    "ping",
+                    "-h",
+                    "localhost",
+                    "-ujordan",
+                    "-p123456",
+                ]
+            interval: 30s
+            timeout: 10s
+            retries: 5
+        deploy:
+            resources:
+                limits:
+                    cpus: "1"
+                    memory: 1G
+        command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
 
-  # Client service
-  client:
-    build:
-      context: .
-      dockerfile: ./docker/client/Dockerfile
-    container_name: "2009scape_client"
-    restart: unless-stopped
-    ports:
-      - "8080:8080" # WebSocket port
-      - "6080:6080" # noVNC web interface
-      - "5900:5900" # VNC port
-    volumes:
-      # - "2009scape_client_config:/home/player/.config"
-      - "./config:/app/config"
-    environment:
-      - TZ=America/New_York
-      - SERVER_HOST=app
-      - SERVER_PORT=43594
-      - RS2009_SERVER_HOST=app
-      - RS2009_SERVER_PORT=43594
-      - RS2009_WEBSOCKET_PORT=8080
-      - DISPLAY=:1
-      - VNC_PASSWORD=password
-    networks:
-      - 2009scape_network
-    deploy:
-      resources:
-        limits:
-          cpus: '4'
-          memory: 4G
+    # Desktop client service (noVNC)
+    client:
+        build:
+            context: .
+            dockerfile: ./docker/client/Dockerfile
+        container_name: "rustscape_client"
+        restart: unless-stopped
+        depends_on:
+            app:
+                condition: service_healthy
+        ports:
+            - "8080:8080" # WebSocket port (for client)
+            - "6080:6080" # noVNC web interface
+            - "5900:5900" # VNC port
+        volumes:
+            - "./config:/app/config"
+        environment:
+            - TZ=America/New_York
+            - SERVER_HOST=app
+            - SERVER_PORT=43594
+            - RUSTSCAPE_SERVER_HOST=app
+            - RUSTSCAPE_SERVER_PORT=43594
+            - RUSTSCAPE_WEBSOCKET_PORT=8080
+            - DISPLAY=:1
+            - VNC_PASSWORD=password
+        networks:
+            - rustscape_network
+        healthcheck:
+            test: ["CMD", "nc", "-z", "localhost", "6080"]
+            interval: 30s
+            timeout: 10s
+            start_period: 60s
+            retries: 3
+        deploy:
+            resources:
+                limits:
+                    cpus: "4"
+                    memory: 4G
 
-  # Web server for client UI
-  nginx:
-    build:
-      context: .
-      dockerfile: ./docker/nginx/Dockerfile
-    container_name: "2009scape_nginx"
-    restart: unless-stopped
-    ports:
-      - "80:80"
-    networks:
-      - 2009scape_network
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 512M
+    # Web server for browser client
+    nginx:
+        build:
+            context: .
+            dockerfile: ./docker/nginx/Dockerfile
+        container_name: "rustscape_nginx"
+        restart: unless-stopped
+        depends_on:
+            - app
+        ports:
+            - "80:80"
+        networks:
+            - rustscape_network
+        healthcheck:
+            test: ["CMD", "curl", "-f", "http://localhost/health"]
+            interval: 30s
+            timeout: 10s
+            start_period: 10s
+            retries: 3
+        deploy:
+            resources:
+                limits:
+                    cpus: "0.5"
+                    memory: 512M
 
-# You can uncomment these if you want to use named volumes
+# Named volumes for persistent data
 volumes:
-  2009scape_app_data:
-  2009scape_app_logs:
-  2009scape_db:
-  2009scape_client_config:
+    rustscape_app_data:
+    rustscape_app_logs:
+    rustscape_db:
+    rustscape_client_config:
 
+# Docker network
 networks:
-  2009scape_network:
-    driver: bridge
-    ipam:
-      driver: default
-      config:
-        - subnet: 172.28.0.0/16
+    rustscape_network:
+        driver: bridge
+        ipam:
+            driver: default
+            config:
+                - subnet: 172.28.0.0/16
