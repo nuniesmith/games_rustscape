@@ -1,0 +1,67 @@
+# Rustscape Server Configuration
+# This file configures the game server settings
+
+# Server identification
+server_name = "Rustscape"
+world_id = 1
+
+# Network ports
+# Base game port for native TCP clients (actual port = game_port + world_id)
+game_port = 43594
+
+# WebSocket port for browser-based clients
+websocket_port = 43596
+
+# Management API port for server administration
+management_port = 5555
+
+# File paths
+# Path to the game cache directory containing cache files
+cache_path = "./data/cache"
+
+# Path to data files (configs, scripts, definitions, etc.)
+data_path = "./data"
+
+# Server limits
+# Maximum number of concurrent players
+max_players = 2000
+
+# Game tick rate in milliseconds (600ms = standard RuneScape tick)
+tick_rate_ms = 600
+
+# Development options
+# Enable development mode (relaxed security, extra logging)
+dev_mode = true
+
+# Enable debug logging
+debug = true
+
+# Watchdog configuration
+# Enable watchdog timer to detect hung game loops
+watchdog_enabled = true
+
+# Watchdog timeout in seconds (default 2 hours)
+watchdog_timeout = 7200
+
+# Database configuration
+[database]
+host = "localhost"
+port = 3306
+database = "rustscape"
+username = "rustscape"
+password = ""
+pool_size = 10
+
+# RSA Configuration
+# WARNING: These are DEVELOPMENT keys only!
+# In production, use proper RSA keys and store them securely
+# via environment variables: RUSTSCAPE_RSA_MODULUS, RUSTSCAPE_RSA_PRIVATE_EXPONENT
+[rsa]
+# RSA modulus (N) as hex string - 512-bit for development
+modulus = "b57b2a5ec83c10a3e2d5f7c8b9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7081929a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3"
+
+# RSA private exponent (D) as hex string
+private_exponent = "4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f7081929a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d32a1b2c3d4e5f6a7b8c9d0e1f2a3"
+
+# RSA public exponent (E) - standard value
+public_exponent = 65537

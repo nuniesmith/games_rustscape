@@ -175,6 +175,9 @@ Cargo.lock
 src/rust/**/Cargo.lock
 **/*.rs.bk
 
+# Keep server Cargo.lock (binary, not library)
+!src/server/Cargo.lock
+
 # Node.js
 node_modules/
 /.pnp
@@ -302,6 +305,10 @@ outputs/
 fks-ssh-keys
 # Local environment marker
 .local
+
+# Archive git repositories (reference only, not part of this project)
+archive/09launcher/
+archive/2009scape/
 
 ./data/backups/*
 # Analysis artifacts
