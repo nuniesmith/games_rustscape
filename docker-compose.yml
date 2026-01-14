@@ -92,7 +92,7 @@ services:
         container_name: "rustscape_db"
         restart: always
         ports:
-            - "3306:3306"
+            - "3307:3306"
         volumes:
             - "rustscape_db:/var/lib/mysql"
             - "./config/mysql/init:/docker-entrypoint-initdb.d:ro"
