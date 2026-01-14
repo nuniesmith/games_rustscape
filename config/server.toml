@@ -43,14 +43,38 @@ watchdog_enabled = true
 # Watchdog timeout in seconds (default 2 hours)
 watchdog_timeout = 7200
 
-# Database configuration
+# PostgreSQL Database configuration
+# Environment variables override these values:
+# RUSTSCAPE_DATABASE_HOST, RUSTSCAPE_DATABASE_PORT, RUSTSCAPE_DATABASE_USER,
+# RUSTSCAPE_DATABASE_PASSWORD, RUSTSCAPE_DATABASE_NAME
 [database]
+type = "postgres"
 host = "localhost"
-port = 3306
+port = 5432
 database = "rustscape"
 username = "rustscape"
-password = ""
+password = "rustscape_dev_password"
 pool_size = 10
+# Connection timeout in seconds
+connect_timeout = 30
+# Enable SSL for database connections (recommended for production)
+ssl_mode = "prefer"
+
+# Redis configuration
+# Environment variables override these values:
+# RUSTSCAPE_REDIS_HOST, RUSTSCAPE_REDIS_PORT, RUSTSCAPE_REDIS_PASSWORD
+[redis]
+host = "localhost"
+port = 6379
+password = ""
+# Database index (0-15)
+database = 0
+# Connection pool size
+pool_size = 5
+# Key prefix for namespacing
+key_prefix = "rustscape:"
+# Session TTL in seconds (24 hours)
+session_ttl = 86400
 
 # RSA Configuration
 # WARNING: These are DEVELOPMENT keys only!
@@ -65,3 +89,24 @@ private_exponent = "4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5
 
 # RSA public exponent (E) - standard value
 public_exponent = 65537
+
+# Authentication configuration
+# Environment variable: RUSTSCAPE_JWT_SECRET
+[auth]
+# Enable user registration
+registration_enabled = true
+# Minimum password length
+min_password_length = 6
+# Maximum login attempts before lockout
+max_login_attempts = 5
+# Lockout duration in seconds (15 minutes)
+lockout_duration = 900
+# JWT access token expiration in seconds (24 hours)
+access_token_expiration = 86400
+# JWT refresh token expiration in seconds (7 days)
+refresh_token_expiration = 604800
+# Bcrypt cost factor for password hashing
+bcrypt_cost = 12
+# JWT secret key for signing tokens
+# WARNING: Change this in production! Use RUSTSCAPE_JWT_SECRET env var
+jwt_secret = "rustscape_dev_jwt_secret_change_in_production_use_env_var"

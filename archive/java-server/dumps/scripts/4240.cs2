@@ -1,5 +1,0 @@
-void script_4240() {
-	setWidgetBorderThickness(0, new WidgetPointer(1078,23));
-	script_4161(70647825, 255);
-	return;
-}

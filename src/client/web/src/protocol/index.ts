@@ -2,7 +2,8 @@
  * Protocol module - Network protocol implementations for Rustscape
  */
 
-export { ByteBuffer } from './ByteBuffer';
+export { ByteBuffer } from "./ByteBuffer";
+export { Isaac, IsaacPair } from "./Isaac";
 
 // Re-export types
-export type { default as ByteBufferType } from './ByteBuffer';
+export type { default as ByteBufferType } from "./ByteBuffer";

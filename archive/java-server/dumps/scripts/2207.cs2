@@ -1,6 +1,0 @@
-void script_2207() {
-	if (((boolean)globalint_1137)) {
-		setScriptCallOnGameloop(2212, "", new WidgetPointer(932,1));
-	}
-	return;
-}

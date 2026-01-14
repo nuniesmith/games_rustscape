@@ -781,7 +781,7 @@ mod tests {
         let s2 = manager
             .create_session("127.0.0.1:2".parse().unwrap(), false)
             .unwrap();
-        let s3 = manager
+        let _s3 = manager
             .create_session("127.0.0.1:3".parse().unwrap(), false)
             .unwrap();
 

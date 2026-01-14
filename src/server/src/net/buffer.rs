@@ -596,7 +596,7 @@ impl PacketBuffer {
         let mut byte_pos = self.bit_pos / 8;
         let mut bit_offset = 8 - (self.bit_pos % 8);
         let mut remaining = count;
-        let mut val = value;
+        let val = value;
 
         self.bit_pos += count;
 

@@ -1,8 +1,0 @@
-void script_1139(int arg0) {
-	if (((boolean)standart_config_172)) {
-		setWidgetText(new WidgetPointer(arg0), "Auto Retaliate " + "<br>" + "(Off)");
-	} else {
-		setWidgetText(new WidgetPointer(arg0), "Auto Retaliate " + "<br>" + "(On)");
-	}
-	return;
-}

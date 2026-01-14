@@ -143,6 +143,12 @@ pub enum CacheError {
 
     #[error("Cache version mismatch")]
     VersionMismatch,
+
+    #[error("Invalid data: {0}")]
+    InvalidData(String),
+
+    #[error("IO error: {0}")]
+    Io(String),
 }
 
 /// Authentication-specific errors
@@ -241,6 +247,9 @@ pub enum GameError {
 
     #[error("Region not loaded: ({x}, {y})")]
     RegionNotLoaded { x: i32, y: i32 },
+
+    #[error("Database error: {0}")]
+    DatabaseError(String),
 }
 
 /// Result type alias for Rustscape operations

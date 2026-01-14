@@ -1,6 +1,0 @@
-void script_675() {
-	sendCloseWidgetPacket();
-	script_1364();
-	globalint_199 = -1;
-	return;
-}

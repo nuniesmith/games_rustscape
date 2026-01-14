@@ -7,6 +7,6 @@
 //! - Region/map management
 //! - Combat and skills (future)
 
+pub mod persistence;
 pub mod player;
 pub mod world;
-

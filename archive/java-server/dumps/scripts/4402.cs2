@@ -1,4 +1,0 @@
-void script_4402(int arg0) {
-	setWidgetRGB(new Color(getColorRelatedMethod4020(standart_config_2095)), new WidgetPointer(arg0));
-	return;
-}

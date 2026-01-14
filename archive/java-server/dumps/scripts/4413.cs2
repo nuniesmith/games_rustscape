@@ -1,8 +1,0 @@
-void script_4413() {
-	if (cs2method3700()) {
-		script_4415();
-	} else {
-		setScriptCallOnClanChatSettingsStuff(4414, "", new WidgetPointer(1107,170));
-	}
-	return;
-}

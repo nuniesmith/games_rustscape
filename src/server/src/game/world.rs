@@ -5,9 +5,10 @@
 //! - Entity updates (players, NPCs, objects)
 //! - Region management
 //! - World events and broadcasts
+//! - Periodic autosave of player data
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+
 use std::time::{Duration, Instant};
 
 use parking_lot::RwLock;
@@ -16,9 +17,15 @@ use tokio::time::{interval, MissedTickBehavior};
 use tracing::{debug, error, info};
 
 use crate::error::Result;
+use crate::game::persistence::PlayerPersistence;
+use crate::game::player::PlayerManager;
+use uuid::Uuid;
 
 /// Standard game tick rate in milliseconds
 pub const TICK_RATE_MS: u64 = 600;
+
+/// Default autosave interval in ticks (5 minutes = 500 ticks at 600ms)
+pub const AUTOSAVE_INTERVAL_TICKS: u64 = 500;
 
 /// Maximum players per world
 pub const MAX_PLAYERS: usize = 2048;
@@ -43,6 +50,8 @@ pub struct WorldSettings {
     pub tick_rate_ms: u64,
     /// Maximum players allowed
     pub max_players: usize,
+    /// Autosave interval in ticks (0 to disable)
+    pub autosave_interval: u64,
 }
 
 impl Default for WorldSettings {
@@ -55,6 +64,7 @@ impl Default for WorldSettings {
             dev_mode: true,
             tick_rate_ms: TICK_RATE_MS,
             max_players: MAX_PLAYERS,
+            autosave_interval: AUTOSAVE_INTERVAL_TICKS,
         }
     }
 }
@@ -130,6 +140,10 @@ pub struct GameWorld {
     update_countdown: AtomicU64,
     /// Number of online players
     player_count: AtomicU64,
+    /// Player manager
+    pub players: PlayerManager,
+    /// Ticks since last autosave
+    ticks_since_autosave: AtomicU64,
 }
 
 impl GameWorld {
@@ -147,6 +161,8 @@ impl GameWorld {
             "Creating game world"
         );
 
+        let max_players = settings.max_players.min(MAX_PLAYERS) as u16;
+
         Ok(Self {
             settings,
             state: RwLock::new(WorldState::Initializing),
@@ -155,6 +171,8 @@ impl GameWorld {
             start_time: RwLock::new(None),
             update_countdown: AtomicU64::new(0),
             player_count: AtomicU64::new(0),
+            players: PlayerManager::new(max_players),
+            ticks_since_autosave: AtomicU64::new(0),
         })
     }
 
@@ -222,11 +240,21 @@ impl GameWorld {
         info!("Update countdown cancelled");
     }
 
-    /// Run the game world tick loop
+    /// Run the game world tick loop (without persistence)
     pub async fn run(&self, shutdown_rx: &mut broadcast::Receiver<()>) {
+        self.run_with_persistence(shutdown_rx, None).await
+    }
+
+    /// Run the game world tick loop with optional persistence for autosave
+    pub async fn run_with_persistence(
+        &self,
+        shutdown_rx: &mut broadcast::Receiver<()>,
+        persistence: Option<&PlayerPersistence>,
+    ) {
         info!(
             world_id = self.settings.world_id,
             tick_rate_ms = self.settings.tick_rate_ms,
+            autosave_enabled = persistence.is_some(),
             "Starting game world"
         );
 
@@ -247,8 +275,8 @@ impl GameWorld {
                         break;
                     }
 
-                    // Process game tick
-                    if let Err(e) = self.process_tick().await {
+                    // Process game tick with persistence for autosave
+                    if let Err(e) = self.process_tick(persistence).await {
                         error!(error = %e, "Error processing game tick");
                     }
 
@@ -271,6 +299,12 @@ impl GameWorld {
             }
         }
 
+        // Final save before shutdown
+        if let Some(persistence) = persistence {
+            info!("Performing final save before shutdown");
+            self.autosave_players(persistence).await;
+        }
+
         // Cleanup
         self.running.store(false, Ordering::SeqCst);
         self.set_state(WorldState::Stopped);
@@ -283,7 +317,7 @@ impl GameWorld {
     }
 
     /// Process a single game tick
-    async fn process_tick(&self) -> Result<()> {
+    async fn process_tick(&self, persistence: Option<&PlayerPersistence>) -> Result<()> {
         let tick_num = self.tick.fetch_add(1, Ordering::SeqCst);
 
         // Log periodically
@@ -303,10 +337,101 @@ impl GameWorld {
         // 5. Update entity positions
         // 6. Send outgoing packets
 
-        // TODO: Implement actual tick processing
-        // For now, this is just a placeholder
+        // Check if autosave is due
+        if self.settings.autosave_interval > 0 {
+            let ticks = self.ticks_since_autosave.fetch_add(1, Ordering::SeqCst) + 1;
+            if ticks >= self.settings.autosave_interval {
+                self.ticks_since_autosave.store(0, Ordering::SeqCst);
+                if let Some(persistence) = persistence {
+                    self.autosave_players(persistence).await;
+                }
+            }
+        }
 
         Ok(())
+    }
+
+    /// Autosave all online players
+    async fn autosave_players(&self, persistence: &PlayerPersistence) {
+        let player_count = self.players.count();
+        if player_count == 0 {
+            return;
+        }
+
+        info!(player_count = player_count, "Starting periodic autosave");
+
+        let mut saved = 0;
+        let mut failed = 0;
+
+        // Collect players to save (we can't hold the iterator across await)
+        let players_to_save: Vec<_> = {
+            let mut players = Vec::new();
+            self.players.for_each(|player| {
+                // Use real user_id from database auth if available, otherwise generate from username
+                let user_id = player.user_id.unwrap_or_else(|| {
+                    Uuid::new_v5(&Uuid::NAMESPACE_OID, player.username.as_bytes())
+                });
+                players.push((
+                    player.username.clone(),
+                    player.display_name.clone(),
+                    user_id,
+                ));
+            });
+            players
+        };
+
+        for (username, display_name, user_id) in players_to_save {
+            // Get the player again (it might have logged out)
+            if let Some(player) = self.players.get_by_username(&username) {
+                // Load existing player ID
+                match persistence.load_by_user_id(user_id).await {
+                    Ok(Some(existing)) => {
+                        let player_data = player.to_player_data(existing.id, user_id);
+                        match persistence.save(&player_data).await {
+                            Ok(_) => {
+                                saved += 1;
+                                debug!(username = %username, "Autosaved player");
+                            }
+                            Err(e) => {
+                                failed += 1;
+                                error!(
+                                    username = %username,
+                                    error = %e,
+                                    "Failed to autosave player"
+                                );
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        // Player doesn't exist in DB yet, create them
+                        match persistence.create_for_user(user_id, display_name).await {
+                            Ok(_) => {
+                                saved += 1;
+                                debug!(username = %username, "Created player during autosave");
+                            }
+                            Err(e) => {
+                                failed += 1;
+                                error!(
+                                    username = %username,
+                                    error = %e,
+                                    "Failed to create player during autosave"
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        failed += 1;
+                        error!(
+                            username = %username,
+                            error = %e,
+                            "Failed to load player for autosave"
+                        );
+                    }
+                }
+            }
+        }
+
+        info!(saved = saved, failed = failed, "Autosave complete");
     }
 
     /// Broadcast a message to all players
@@ -336,6 +461,7 @@ impl std::fmt::Debug for GameWorld {
             .field("tick", &self.tick())
             .field("running", &self.is_running())
             .field("player_count", &self.player_count())
+            .field("registered_players", &self.players.count())
             .field("uptime_secs", &self.uptime_secs())
             .finish()
     }

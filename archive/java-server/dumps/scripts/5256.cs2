@@ -1,3 +1,0 @@
-int script_5256() {
-	return bitconfig_9816;
-}

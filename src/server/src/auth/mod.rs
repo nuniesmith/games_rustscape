@@ -2,7 +2,7 @@
 //!
 //! Provides authentication and account management for the game server.
 //! Supports both development mode (accepts all logins) and production mode
-//! (validates against stored credentials).
+//! (validates against stored credentials or database).
 
 use std::collections::HashMap;
 use std::sync::RwLock;
@@ -11,15 +11,19 @@ use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
 };
+use sqlx::PgPool;
 use tracing::{debug, info, warn};
+use uuid::Uuid;
 
 use crate::error::{AuthError, Result, RustscapeError};
 
 /// Player account information
 #[derive(Debug, Clone)]
 pub struct Account {
-    /// Unique account ID
+    /// Unique account ID (legacy sequential ID for in-memory accounts)
     pub id: u64,
+    /// Database user UUID (from users table, used for persistence)
+    pub user_id: Option<Uuid>,
     /// Username (normalized)
     pub username: String,
     /// Password hash (Argon2)
@@ -40,6 +44,7 @@ impl Account {
         let password_hash = hash_password(password)?;
         Ok(Self {
             id,
+            user_id: None,
             username: normalize_username(username),
             password_hash,
             rights: 0,
@@ -49,10 +54,25 @@ impl Account {
         })
     }
 
+    /// Create a new account with a database user ID
+    pub fn with_user_id(id: u64, user_id: Uuid, username: &str, password_hash: String) -> Self {
+        Self {
+            id,
+            user_id: Some(user_id),
+            username: normalize_username(username),
+            password_hash,
+            rights: 0,
+            member: false,
+            enabled: true,
+            locked: false,
+        }
+    }
+
     /// Create a development account (no password hashing)
     pub fn dev_account(id: u64, username: &str) -> Self {
         Self {
             id,
+            user_id: None,
             username: normalize_username(username),
             password_hash: String::new(),
             rights: 2, // Admin in dev mode
@@ -81,6 +101,35 @@ pub struct AuthResult {
     pub player_index: u16,
 }
 
+impl AuthResult {
+    /// Get the database user ID if available
+    pub fn user_id(&self) -> Option<Uuid> {
+        self.account.user_id
+    }
+}
+
+/// Database user record (from users table)
+#[derive(Debug, Clone, sqlx::FromRow)]
+struct DbUserRecord {
+    id: Uuid,
+    username: String,
+    password_hash: String,
+    rights: i16,
+    is_member: bool,
+    is_banned: bool,
+    locked_until: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl DbUserRecord {
+    fn is_locked(&self) -> bool {
+        if let Some(locked_until) = self.locked_until {
+            locked_until > chrono::Utc::now()
+        } else {
+            false
+        }
+    }
+}
+
 /// Authentication service for managing player accounts and logins
 pub struct AuthService {
     /// Whether running in development mode
@@ -93,6 +142,8 @@ pub struct AuthService {
     active_indices: RwLock<Vec<bool>>,
     /// Maximum number of players
     max_players: u16,
+    /// Optional database pool for production auth
+    db_pool: Option<PgPool>,
 }
 
 impl AuthService {
@@ -105,6 +156,7 @@ impl AuthService {
             next_id: RwLock::new(1),
             active_indices: RwLock::new(vec![false; max_players as usize + 1]),
             max_players,
+            db_pool: None,
         }
     }
 
@@ -116,7 +168,26 @@ impl AuthService {
             next_id: RwLock::new(1),
             active_indices: RwLock::new(vec![false; max_players as usize + 1]),
             max_players,
+            db_pool: None,
         }
+    }
+
+    /// Create with database pool for production auth
+    pub fn with_database(dev_mode: bool, db_pool: PgPool) -> Self {
+        let max_players = 2000;
+        Self {
+            dev_mode,
+            accounts: RwLock::new(HashMap::new()),
+            next_id: RwLock::new(1),
+            active_indices: RwLock::new(vec![false; max_players as usize + 1]),
+            max_players,
+            db_pool: Some(db_pool),
+        }
+    }
+
+    /// Check if database authentication is available
+    pub fn has_database(&self) -> bool {
+        self.db_pool.is_some()
     }
 
     /// Authenticate a user with username and password
@@ -171,6 +242,105 @@ impl AuthService {
             username = %username_normalized,
             player_index = player_index,
             "Authentication successful"
+        );
+
+        Ok(AuthResult {
+            account,
+            player_index,
+        })
+    }
+
+    /// Authenticate a user against the database
+    /// This is the preferred method when database is available
+    pub async fn authenticate_db(&self, username: &str, password: &str) -> Result<AuthResult> {
+        let username_normalized = normalize_username(username);
+
+        // If in dev mode, use the sync method
+        if self.dev_mode {
+            return self.authenticate(username, password);
+        }
+
+        // Check if we have a database connection
+        let pool = match &self.db_pool {
+            Some(pool) => pool,
+            None => {
+                // Fall back to in-memory authentication
+                return self.authenticate(username, password);
+            }
+        };
+
+        // Query the database for the user
+        let user: Option<DbUserRecord> = sqlx::query_as(
+            r#"
+            SELECT id, username, password_hash, rights, is_member, is_banned, locked_until
+            FROM users
+            WHERE username_lower = $1
+            "#,
+        )
+        .bind(&username_normalized)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| {
+            warn!(error = %e, "Database query failed during authentication");
+            RustscapeError::Auth(AuthError::InvalidCredentials)
+        })?;
+
+        let user = user.ok_or(RustscapeError::Auth(AuthError::InvalidCredentials))?;
+
+        // Check if account is banned
+        if user.is_banned {
+            return Err(RustscapeError::Auth(AuthError::AccountDisabled));
+        }
+
+        // Check if account is locked
+        if user.is_locked() {
+            return Err(RustscapeError::Auth(AuthError::AccountLocked));
+        }
+
+        // Verify password using bcrypt (database uses pgcrypto's crypt)
+        // First try bcrypt verification
+        let password_valid = verify_password_bcrypt(password, &user.password_hash)
+            .or_else(|| verify_password_argon2(password, &user.password_hash))
+            .unwrap_or(false);
+
+        if !password_valid {
+            warn!(username = %username_normalized, "Failed login attempt - invalid password");
+            return Err(RustscapeError::Auth(AuthError::InvalidCredentials));
+        }
+
+        // Create account from database record
+        let id = {
+            let mut next_id = self.next_id.write().unwrap();
+            let id = *next_id;
+            *next_id += 1;
+            id
+        };
+
+        let account = Account {
+            id,
+            user_id: Some(user.id),
+            username: user.username.clone(),
+            password_hash: user.password_hash,
+            rights: user.rights as u8,
+            member: user.is_member,
+            enabled: true,
+            locked: false,
+        };
+
+        // Also store in the in-memory cache for subsequent lookups
+        {
+            let mut accounts = self.accounts.write().unwrap();
+            accounts.insert(username_normalized.clone(), account.clone());
+        }
+
+        // Allocate player index
+        let player_index = self.allocate_player_index()?;
+
+        info!(
+            username = %username_normalized,
+            user_id = %user.id,
+            player_index = player_index,
+            "Database authentication successful"
         );
 
         Ok(AuthResult {
@@ -350,24 +520,35 @@ fn hash_password(password: &str) -> Result<String> {
 
     let password_hash = argon2
         .hash_password(password.as_bytes(), &salt)
-        .map_err(|e| {
-            RustscapeError::Internal(format!("Failed to hash password: {}", e))
-        })?
+        .map_err(|e| RustscapeError::Internal(format!("Failed to hash password: {}", e)))?
         .to_string();
 
     Ok(password_hash)
 }
 
-/// Verify a password against a hash
+/// Verify a password against an Argon2 hash
 fn verify_password(password: &str, hash: &str) -> bool {
-    let parsed_hash = match PasswordHash::new(hash) {
-        Ok(h) => h,
-        Err(_) => return false,
-    };
+    verify_password_argon2(password, hash).unwrap_or(false)
+}
 
-    Argon2::default()
-        .verify_password(password.as_bytes(), &parsed_hash)
-        .is_ok()
+/// Verify a password against an Argon2 hash (returns Option for chaining)
+fn verify_password_argon2(password: &str, hash: &str) -> Option<bool> {
+    let parsed_hash = PasswordHash::new(hash).ok()?;
+    Some(
+        Argon2::default()
+            .verify_password(password.as_bytes(), &parsed_hash)
+            .is_ok(),
+    )
+}
+
+/// Verify a password against a bcrypt hash (used by pgcrypto)
+fn verify_password_bcrypt(password: &str, hash: &str) -> Option<bool> {
+    // bcrypt hashes start with $2a$, $2b$, or $2y$
+    if !hash.starts_with("$2") {
+        return None;
+    }
+
+    Some(bcrypt::verify(password, hash).unwrap_or(false))
 }
 
 #[cfg(test)]
@@ -444,23 +625,23 @@ mod tests {
     }
 
     #[test]
-    fn test_release_player_index() {
-        let auth = AuthService::with_max_players(true, 2);
+        fn test_release_player_index() {
+            let auth = AuthService::with_max_players(true, 2);
 
-        let result1 = auth.authenticate("user1", "pass").unwrap();
-        let result2 = auth.authenticate("user2", "pass").unwrap();
+            let result1 = auth.authenticate("user1", "pass").unwrap();
+            let _result2 = auth.authenticate("user2", "pass").unwrap();
 
-        // World full
-        assert!(auth.authenticate("user3", "pass").is_err());
+            // World full
+            assert!(auth.authenticate("user3", "pass").is_err());
 
-        // Release an index
-        auth.release_player_index(result1.player_index);
+            // Release an index
+            auth.release_player_index(result1.player_index);
 
-        // Now we can add another
-        let result3 = auth.authenticate("user3", "pass");
-        assert!(result3.is_ok());
-        assert_eq!(result3.unwrap().player_index, result1.player_index);
-    }
+            // Now we can add another
+            let result3 = auth.authenticate("user3", "pass");
+            assert!(result3.is_ok());
+            assert_eq!(result3.unwrap().player_index, result1.player_index);
+        }
 
     #[test]
     fn test_account_disabled() {
@@ -520,5 +701,33 @@ mod tests {
         // Too long
         let result = auth.register("testuser", "a]".repeat(15).as_str());
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_account_with_user_id() {
+        let user_id = Uuid::new_v4();
+        let account = Account::with_user_id(1, user_id, "testuser", "hash".to_string());
+
+        assert_eq!(account.user_id, Some(user_id));
+        assert_eq!(account.username, "testuser");
+    }
+
+    #[test]
+    fn test_auth_result_user_id() {
+        let user_id = Uuid::new_v4();
+        let account = Account::with_user_id(1, user_id, "testuser", "hash".to_string());
+
+        let auth_result = AuthResult {
+            account,
+            player_index: 1,
+        };
+
+        assert_eq!(auth_result.user_id(), Some(user_id));
+    }
+
+    #[test]
+    fn test_has_database() {
+        let auth = AuthService::new(false);
+        assert!(!auth.has_database());
     }
 }

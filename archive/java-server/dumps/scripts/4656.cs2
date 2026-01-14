@@ -1,6 +1,0 @@
-void script_4656(int arg0) {
-	SWITCH (globalint_1532) {
-	}
-	cameraUnlock();
-	return;
-}

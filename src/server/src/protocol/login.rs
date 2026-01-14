@@ -527,20 +527,20 @@ mod tests {
     }
 
     #[test]
-    fn test_create_isaac_pair() {
-        let seeds = [12345, 67890, 11111, 22222];
-        let pair = LoginHandler::create_isaac_pair(&seeds);
+        fn test_create_isaac_pair() {
+            let seeds = [12345, 67890, 11111, 22222];
+            let pair = LoginHandler::create_isaac_pair(&seeds);
 
-        // Verify the pair works for encoding/decoding
-        let mut pair_clone = pair.clone();
-        let opcode: u8 = 42;
-        let encoded = pair_clone.encode_opcode(opcode);
-        let decoded = pair_clone.decode_opcode(encoded);
+            // Verify the pair works for encoding/decoding
+            let mut pair_clone = pair.clone();
+            let opcode: u8 = 42;
+            let encoded = pair_clone.encode_opcode(opcode);
+            let _decoded = pair_clone.decode_opcode(encoded);
 
-        // Note: decode uses a different cipher stream, so this won't round-trip
-        // unless we're testing client/server pair interaction
-        assert!(encoded != opcode || opcode == 0); // Usually different unless wraps
-    }
+            // Note: decode uses a different cipher stream, so this won't round-trip
+            // unless we're testing client/server pair interaction
+            assert!(encoded != opcode || opcode == 0); // Usually different unless wraps
+        }
 
     #[test]
     fn test_login_block_creation() {

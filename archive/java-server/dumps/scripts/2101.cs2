@@ -1,4 +1,0 @@
-void script_2101(int arg0) {
-	setItemOnWidgetMethod2200(standart_config_856, 1, new WidgetPointer(arg0));
-	return;
-}

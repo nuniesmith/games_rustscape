@@ -1,4 +1,0 @@
-void script_3051() {
-	script_3015(4, "Remove ignore", "", "", "");
-	return;
-}

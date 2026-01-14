@@ -412,13 +412,13 @@ mod tests {
     }
 
     #[test]
-    fn test_next_byte() {
-        let mut isaac = Isaac::new(&[0xDEADBEEF, 0xCAFEBABE, 0x12345678, 0x87654321]);
+        fn test_next_byte() {
+            let mut isaac = Isaac::new(&[0xDEADBEEF, 0xCAFEBABE, 0x12345678, 0x87654321]);
 
-        // next_byte should only return values 0-255
-        for _ in 0..1000 {
-            let byte = isaac.next_byte();
-            assert!(byte <= 255);
+            // next_byte should only return values 0-255 (guaranteed by u8 type)
+            // Just verify we can call it many times without issues
+            for _ in 0..1000 {
+                let _byte = isaac.next_byte();
+            }
         }
-    }
 }

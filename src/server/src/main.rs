@@ -1,93 +1,26 @@
 //! Rustscape Game Server
 //!
 //! A Rust implementation of a 530 revision RSPS server with WebSocket support
-//! for browser-based clients.
-
-mod auth;
-mod cache;
-mod config;
-mod crypto;
-mod error;
-mod game;
-mod net;
-mod protocol;
+//! for browser-based clients and REST API for authentication.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::Result;
+use sqlx::postgres::PgPoolOptions;
 use tokio::net::TcpListener;
 use tokio::signal;
 use tokio::sync::broadcast;
 use tracing::{error, info, warn};
 use tracing_subscriber::{fmt, EnvFilter};
 
-use crate::auth::AuthService;
-use crate::cache::CacheStore;
-use crate::config::ServerConfig;
-use crate::crypto::RsaDecryptor;
-use crate::game::world::GameWorld;
-use crate::net::handler::ConnectionHandler;
-use crate::net::session::SessionManager;
-
-/// Server version
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-
-/// Server revision (must match client)
-pub const REVISION: u32 = 530;
-
-/// Application state shared across all connections
-pub struct AppState {
-    pub config: ServerConfig,
-    pub session_manager: SessionManager,
-    pub cache: Arc<CacheStore>,
-    pub world: Arc<GameWorld>,
-    pub rsa: Option<Arc<RsaDecryptor>>,
-    pub auth: Arc<AuthService>,
-    pub shutdown_tx: broadcast::Sender<()>,
-}
-
-impl AppState {
-    pub fn new(config: ServerConfig, shutdown_tx: broadcast::Sender<()>) -> Result<Self> {
-        let cache = Arc::new(CacheStore::new(&config.cache_path)?);
-        let world = Arc::new(GameWorld::new(config.world_id)?);
-
-        // Initialize RSA decryptor from config
-        let rsa = match RsaDecryptor::from_hex(
-            &config.rsa.modulus,
-            &config.rsa.private_exponent,
-            config.rsa.public_exponent,
-        ) {
-            Ok(decryptor) => {
-                info!(
-                    "RSA decryptor initialized (key size: {} bits)",
-                    decryptor.key_pair().key_size_bits()
-                );
-                Some(Arc::new(decryptor))
-            }
-            Err(e) => {
-                warn!("Failed to initialize RSA decryptor: {}. Login will use dev mode (no encryption).", e);
-                None
-            }
-        };
-
-        // Initialize auth service
-        let auth = Arc::new(AuthService::new(config.dev_mode));
-        if config.dev_mode {
-            info!("Auth service running in DEVELOPMENT mode - all logins accepted");
-        }
-
-        Ok(Self {
-            config,
-            session_manager: SessionManager::new(),
-            cache,
-            world,
-            rsa,
-            auth,
-            shutdown_tx,
-        })
-    }
-}
+use rustscape_server::api;
+use rustscape_server::api::auth::AuthState;
+use rustscape_server::api::ApiState;
+use rustscape_server::config::ServerConfig;
+use rustscape_server::net::handler::ConnectionHandler;
+use rustscape_server::state::AppState;
+use rustscape_server::{REVISION, VERSION};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -95,8 +28,8 @@ async fn main() -> Result<()> {
     init_logging();
 
     info!("╔══════════════════════════════════════════════╗");
-    info!("║        Rustscape Game Server v{}          ║", VERSION);
-    info!("║          Revision: {}                       ║", REVISION);
+    info!("║        Rustscape Game Server v{}             ║", VERSION);
+    info!("║          Revision: {}                        ║", REVISION);
     info!("╚══════════════════════════════════════════════╝");
 
     // Load configuration
@@ -109,15 +42,55 @@ async fn main() -> Result<()> {
     // Create shutdown channel
     let (shutdown_tx, _) = broadcast::channel::<()>(1);
 
-    // Initialize application state
-    let state = Arc::new(AppState::new(config.clone(), shutdown_tx.clone())?);
+    // Try to create database pool for player persistence
+    let db_pool = create_database_pool(&config).await;
+
+    // Initialize application state for game server (with or without persistence)
+    let state = match &db_pool {
+        Some(pool) => {
+            info!("Initializing application state with database persistence");
+            Arc::new(AppState::with_persistence(
+                config.clone(),
+                shutdown_tx.clone(),
+                pool.clone(),
+            )?)
+        }
+        None => {
+            warn!("Initializing application state without database persistence");
+            Arc::new(AppState::new(config.clone(), shutdown_tx.clone())?)
+        }
+    };
     info!("Application state initialized");
 
-    // Start the game world tick
+    // Initialize API state (with PostgreSQL and Redis)
+    let api_state = match AuthState::new(&config).await {
+        Ok(auth_state) => {
+            info!("API authentication state initialized");
+            Some(ApiState::new(auth_state))
+        }
+        Err(e) => {
+            warn!(
+                "Failed to initialize API state: {}. REST API will be disabled.",
+                e
+            );
+            None
+        }
+    };
+
+    // Start the game world tick (with persistence if available)
     let world_state = state.clone();
+    let world_persistence = db_pool.clone();
     let mut world_shutdown_rx = shutdown_tx.subscribe();
     tokio::spawn(async move {
-        world_state.world.run(&mut world_shutdown_rx).await;
+        if let Some(pool) = world_persistence {
+            let persistence = rustscape_server::game::persistence::PlayerPersistence::new(pool);
+            world_state
+                .world
+                .run_with_persistence(&mut world_shutdown_rx, Some(&persistence))
+                .await;
+        } else {
+            world_state.world.run(&mut world_shutdown_rx).await;
+        }
     });
 
     // Start TCP listener for game connections
@@ -144,6 +117,20 @@ async fn main() -> Result<()> {
         accept_websocket_connections(ws_listener, ws_state, &mut ws_shutdown_rx).await;
     });
 
+    // Start HTTP API server if initialized
+    let api_handle = if let Some(api_state) = api_state {
+        let api_addr: SocketAddr = format!("0.0.0.0:{}", config.management_port).parse()?;
+        let api_listener = TcpListener::bind(api_addr).await?;
+        info!("REST API server listening on: {}", api_addr);
+
+        let api_shutdown_rx = shutdown_tx.subscribe();
+        Some(tokio::spawn(async move {
+            run_api_server(api_listener, api_state, api_shutdown_rx).await;
+        }))
+    } else {
+        None
+    };
+
     info!("Server startup complete!");
     info!("World {} is ready for connections", config.world_id);
 
@@ -153,7 +140,11 @@ async fn main() -> Result<()> {
     info!("Shutting down server...");
 
     // Wait for handlers to finish
-    let _ = tokio::join!(game_handle, ws_handle);
+    let _ = game_handle.await;
+    let _ = ws_handle.await;
+    if let Some(handle) = api_handle {
+        let _ = handle.await;
+    }
 
     // Cleanup
     state.session_manager.disconnect_all().await;
@@ -238,6 +229,60 @@ async fn accept_websocket_connections(
                 info!("WebSocket connection acceptor shutting down");
                 break;
             }
+        }
+    }
+}
+
+/// Run the HTTP API server
+async fn run_api_server(
+    listener: TcpListener,
+    state: ApiState,
+    mut shutdown_rx: broadcast::Receiver<()>,
+) {
+    // Create the API router
+    let router = api::create_router(state);
+
+    // Serve with graceful shutdown
+    info!("Starting REST API server...");
+
+    // Use axum's serve with graceful shutdown
+    let shutdown_signal = async move {
+        let _ = shutdown_rx.recv().await;
+        info!("REST API server shutting down");
+    };
+
+    axum::serve(listener, router)
+        .with_graceful_shutdown(shutdown_signal)
+        .await
+        .unwrap_or_else(|e| error!("API server error: {}", e));
+}
+
+/// Create database pool for player persistence
+async fn create_database_pool(config: &ServerConfig) -> Option<sqlx::PgPool> {
+    let database_url = format!(
+        "postgres://{}:{}@{}:{}/{}",
+        config.database.username,
+        config.database.password,
+        config.database.host,
+        config.database.port,
+        config.database.database
+    );
+
+    match PgPoolOptions::new()
+        .max_connections(10)
+        .connect(&database_url)
+        .await
+    {
+        Ok(pool) => {
+            info!("Database pool created for player persistence");
+            Some(pool)
+        }
+        Err(e) => {
+            warn!(
+                "Failed to create database pool: {}. Player persistence disabled.",
+                e
+            );
+            None
         }
     }
 }

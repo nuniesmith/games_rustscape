@@ -9,21 +9,22 @@ export class ByteBuffer {
     private _bitPosition: number = 0;
     private _inBitMode: boolean = false;
 
-    constructor(sizeOrData: number | Uint8Array | ArrayBuffer) {
-        if (typeof sizeOrData === 'number') {
-            this.buffer = new ArrayBuffer(sizeOrData);
-            this.data = new DataView(this.buffer);
-        } else if (sizeOrData instanceof Uint8Array) {
-            this.buffer = sizeOrData.buffer.slice(
-                sizeOrData.byteOffset,
-                sizeOrData.byteOffset + sizeOrData.byteLength
-            );
-            this.data = new DataView(this.buffer);
-        } else {
-            this.buffer = sizeOrData;
-            this.data = new DataView(this.buffer);
+        constructor(sizeOrData: number | Uint8Array | ArrayBuffer) {
+            if (typeof sizeOrData === 'number') {
+                this.buffer = new ArrayBuffer(sizeOrData);
+                this.data = new DataView(this.buffer);
+            } else if (sizeOrData instanceof Uint8Array) {
+                const sliced = sizeOrData.buffer.slice(
+                    sizeOrData.byteOffset,
+                    sizeOrData.byteOffset + sizeOrData.byteLength
+                );
+                this.buffer = sliced as ArrayBuffer;
+                this.data = new DataView(this.buffer);
+            } else {
+                this.buffer = sizeOrData;
+                this.data = new DataView(this.buffer);
+            }
         }
-    }
 
     // ============ Properties ============
 

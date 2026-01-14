@@ -1,6 +1,0 @@
-void script_2248(int arg0) {
-	if (setWidgetRegister(new WidgetPointer(940,2), arg0)) {
-		setWidgetHidden(0);
-	}
-	return;
-}

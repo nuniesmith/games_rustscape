@@ -1,3 +1,0 @@
-string script_1602(string arg0) {
-	return script_2332(arg0, substr(0, 1, "<lt>"), ">");
-}

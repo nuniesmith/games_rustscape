@@ -1,4 +1,0 @@
-void script_1890(string arg0) {
-	message(11, 0, arg0);
-	return;
-}

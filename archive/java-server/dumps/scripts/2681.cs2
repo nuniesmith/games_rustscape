@@ -1,4 +1,0 @@
-void script_2681() {
-	setWidgetText(new WidgetPointer(398,18), "Number of rooms: " + intToStr(globalint_944));
-	return;
-}

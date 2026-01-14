@@ -1,4 +1,0 @@
-void script_4607() {
-	sendColorPickerPacket(standart_config_2174);
-	return;
-}

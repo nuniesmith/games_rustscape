@@ -11,7 +11,16 @@ repository = "https://github.com/rustscape/rustscape"
 # Async runtime
 tokio = { version = "1.35", features = ["full", "rt-multi-thread", "macros", "sync", "net", "io-util", "time", "signal"] }
 
-# Networking
+# HTTP API server
+axum = { version = "0.7", features = ["json", "tokio", "http2"] }
+axum-extra = { version = "0.9", features = ["typed-header"] }
+tower = { version = "0.4", features = ["util", "timeout", "limit"] }
+tower-http = { version = "0.5", features = ["cors", "trace", "request-id", "compression-gzip"] }
+http = "1.0"
+hyper = { version = "1.0", features = ["full"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+
+# WebSocket
 tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
 tungstenite = "0.21"
 futures-util = "0.3"
@@ -21,14 +30,24 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.8"
 
-# Database
-sqlx = { version = "0.7", features = ["runtime-tokio", "mysql", "macros"] }
+# PostgreSQL Database
+sqlx = { version = "0.7", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json", "macros"] }
+deadpool-postgres = { version = "0.12", features = ["serde"] }
+tokio-postgres = "0.7"
+
+# Redis
+redis = { version = "0.24", features = ["tokio-comp", "connection-manager", "json"] }
+deadpool-redis = "0.14"
 
 # Cryptography
 rand = "0.8"
 num-bigint = "0.4"
 rsa = "0.9"
 argon2 = "0.5"
+bcrypt = "0.15"
+
+# JWT tokens
+jsonwebtoken = "9.2"
 
 # Compression
 flate2 = "1.0"
@@ -46,27 +65,41 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 thiserror = "1.0"
 anyhow = "1.0"
 
+# Regex
+regex = "1.10"
+
 # Utilities
 bytes = "1.5"
 parking_lot = "0.12"
 dashmap = "5.5"
 once_cell = "1.19"
 chrono = { version = "0.4", features = ["serde"] }
-uuid = { version = "1.6", features = ["v4", "serde"] }
+uuid = { version = "1.6", features = ["v4", "v5", "serde"] }
 bitflags = "2.4"
 
 # Configuration
 config = "0.14"
 dotenv = "0.15"
 
+# Validation
+validator = { version = "0.16", features = ["derive"] }
+
 [dev-dependencies]
 tokio-test = "0.4"
 criterion = { version = "0.5", features = ["async_tokio"] }
 pretty_assertions = "1.4"
 
+[lib]
+name = "rustscape_server"
+path = "src/lib.rs"
+
 [[bin]]
 name = "rustscape-server"
 path = "src/main.rs"
+
+[[bin]]
+name = "extract-sprites"
+path = "src/bin/extract_sprites.rs"
 
 [profile.release]
 lto = true

@@ -1,4 +1,0 @@
-void script_536() {
-	setScriptCallOnGameloop(537, getClientCycle(), add(getClientCycle(), 25), "ii", new WidgetPointer(745,2));
-	return;
-}

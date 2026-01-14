@@ -1,4 +1,0 @@
-void script_3444(int arg0) {
-	setWidget3DViewDistance(2000, new WidgetPointer(arg0));
-	return;
-}

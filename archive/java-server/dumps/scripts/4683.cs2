@@ -1,4 +1,0 @@
-void script_4683() {
-	cs2method5421(1, "download.ws");
-	return;
-}

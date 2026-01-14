@@ -12,8 +12,12 @@ use std::sync::Arc;
 use dashmap::DashMap;
 use parking_lot::RwLock;
 use tracing::{debug, info};
+use uuid::Uuid;
 
 use crate::error::{GameError, Result, RustscapeError};
+use crate::game::persistence::{
+    Appearance as PersistenceAppearance, PlayerData, Position, Skill as PersistenceSkill,
+};
 use crate::net::session::SessionId;
 
 /// Maximum player index value
@@ -358,6 +362,8 @@ pub struct Player {
     pub index: u16,
     /// Associated session ID
     pub session_id: SessionId,
+    /// Database user UUID (from users table, for persistence)
+    pub user_id: Option<Uuid>,
     /// Username
     pub username: String,
     /// Display name (can differ from username)
@@ -390,6 +396,7 @@ impl Player {
         Self {
             index,
             session_id,
+            user_id: None,
             username,
             display_name,
             rights: RwLock::new(PlayerRights::Normal),
@@ -401,6 +408,130 @@ impl Player {
             run_energy: RwLock::new(100),
             running: RwLock::new(false),
             last_activity: AtomicU64::new(0),
+        }
+    }
+
+    /// Create a player from persisted PlayerData
+    pub fn from_player_data(
+        index: u16,
+        session_id: SessionId,
+        data: &PlayerData,
+        rights: PlayerRights,
+        member: bool,
+    ) -> Self {
+        // Convert appearance (persistence uses u8, player uses u16 for body parts)
+        let appearance = Appearance {
+            gender: data.appearance.gender,
+            head: data.appearance.head as u16,
+            torso: data.appearance.chest as u16,
+            arms: data.appearance.arms as u16,
+            hands: data.appearance.hands as u16,
+            legs: data.appearance.legs as u16,
+            feet: data.appearance.feet as u16,
+            beard: data.appearance.beard as u16,
+            hair_color: data.appearance.hair_color,
+            torso_color: data.appearance.torso_color,
+            legs_color: data.appearance.legs_color,
+            feet_color: data.appearance.feet_color,
+            skin_color: data.appearance.skin_color,
+        };
+
+        // Convert skills
+        let mut skills = Skills::default();
+        for skill in &data.skills {
+            if let Some(skill_enum) = Skill::from_u8(skill.id) {
+                let idx = skill_enum.as_u8() as usize;
+                if idx < Skill::COUNT {
+                    skills.levels[idx] = skill.level;
+                    skills.experience[idx] = skill.xp;
+                }
+            }
+        }
+
+        let location = Location::new(
+            data.position.x.clamp(0, u16::MAX as i32) as u16,
+            data.position.y.clamp(0, u16::MAX as i32) as u16,
+            data.position.z as u8,
+        );
+
+        debug!(
+            index = index,
+            username = %data.display_name,
+            location = %location,
+            "Created player from persisted data"
+        );
+
+        Self {
+            index,
+            session_id,
+            user_id: Some(data.user_id),
+            username: data.display_name.to_lowercase().replace(' ', "_"),
+            display_name: data.display_name.clone(),
+            rights: RwLock::new(rights),
+            location: RwLock::new(location),
+            previous_location: RwLock::new(location),
+            appearance: RwLock::new(appearance),
+            skills: RwLock::new(skills),
+            member: RwLock::new(member),
+            run_energy: RwLock::new((data.run_energy / 100).min(100) as u8),
+            running: RwLock::new(false),
+            last_activity: AtomicU64::new(0),
+        }
+    }
+
+    /// Convert the player's current state to PlayerData for persistence
+    pub fn to_player_data(&self, player_id: uuid::Uuid, user_id: uuid::Uuid) -> PlayerData {
+        let location = self.location.read();
+        let appearance = self.appearance.read();
+        let skills = self.skills.read();
+
+        // Convert appearance (player uses u16, persistence uses u8 for body parts)
+        let persist_appearance = PersistenceAppearance {
+            gender: appearance.gender,
+            head: appearance.head as u8,
+            beard: appearance.beard as u8,
+            chest: appearance.torso as u8,
+            arms: appearance.arms as u8,
+            hands: appearance.hands as u8,
+            legs: appearance.legs as u8,
+            feet: appearance.feet as u8,
+            hair_color: appearance.hair_color,
+            torso_color: appearance.torso_color,
+            legs_color: appearance.legs_color,
+            feet_color: appearance.feet_color,
+            skin_color: appearance.skin_color,
+        };
+
+        // Convert skills
+        let persist_skills: Vec<PersistenceSkill> = (0..Skill::COUNT)
+            .map(|i| PersistenceSkill {
+                id: i as u8,
+                level: skills.levels[i],
+                xp: skills.experience[i],
+            })
+            .collect();
+
+        let total_level: i32 = persist_skills.iter().map(|s| s.level as i32).sum();
+        let total_xp: i64 = persist_skills.iter().map(|s| s.xp as i64).sum();
+        let combat_level = skills.combat_level() as i16;
+
+        PlayerData {
+            id: player_id,
+            user_id,
+            display_name: self.display_name.clone(),
+            position: Position::new(location.x as i32, location.y as i32, location.z as i16),
+            combat_level,
+            total_level,
+            total_xp,
+            run_energy: (*self.run_energy.read() as i32) * 100,
+            special_energy: 1000, // TODO: Track special energy
+            appearance: persist_appearance,
+            skills: persist_skills,
+            inventory: vec![None; 28], // TODO: Track inventory
+            bank: vec![None; 496],     // TODO: Track bank
+            equipment: vec![None; 14], // TODO: Track equipment
+            time_played: 0,            // TODO: Track time played
+            last_saved: None,
         }
     }
 
@@ -529,6 +660,46 @@ impl PlayerManager {
         Ok(player)
     }
 
+    /// Register a player from persisted PlayerData
+    pub fn register_from_data(
+        &self,
+        session_id: SessionId,
+        data: &PlayerData,
+        rights: PlayerRights,
+        member: bool,
+    ) -> Result<Arc<Player>> {
+        let username = data.display_name.to_lowercase().replace(' ', "_");
+
+        // Check if already registered
+        if self.username_to_index.contains_key(&username) {
+            return Err(RustscapeError::Game(GameError::InvalidPlayerState(
+                "Player already registered".to_string(),
+            )));
+        }
+
+        // Find an available index
+        let index = self.allocate_index()?;
+
+        // Create player from persisted data
+        let player = Arc::new(Player::from_player_data(
+            index, session_id, data, rights, member,
+        ));
+
+        // Register in maps
+        self.players.insert(index, player.clone());
+        self.username_to_index.insert(username.clone(), index);
+        self.session_to_index.insert(session_id, index);
+
+        info!(
+            index = index,
+            username = %data.display_name,
+            session_id = session_id,
+            "Player registered from persisted data"
+        );
+
+        Ok(player)
+    }
+
     /// Unregister a player
     pub fn unregister(&self, index: u16) {
         if let Some((_, player)) = self.players.remove(&index) {
@@ -596,9 +767,9 @@ impl PlayerManager {
     }
 
     /// Iterate over all players
-    pub fn for_each<F>(&self, f: F)
+    pub fn for_each<F>(&self, mut f: F)
     where
-        F: Fn(&Player),
+        F: FnMut(&Player),
     {
         for entry in self.players.iter() {
             f(&entry);

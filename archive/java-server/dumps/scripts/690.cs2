@@ -1,4 +1,0 @@
-void script_690() {
-	setWidgetText(new WidgetPointer(667,25), intToStr(getPlayerWeight()) + " kg");
-	return;
-}

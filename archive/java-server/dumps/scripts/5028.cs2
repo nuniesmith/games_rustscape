@@ -1,3 +1,0 @@
-int script_5028(int arg0) {
-	return divide(arg0, pow(2, 13));
-}

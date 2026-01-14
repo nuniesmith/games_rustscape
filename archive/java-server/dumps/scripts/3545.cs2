@@ -1,3 +1,0 @@
-int script_3545(int arg0) {
-	return cs2method_3408(105, 105, script_3548(bitconfig_7392), mod(add(arg0, bitconfig_7388), getCommonDefinitionSize(script_3548(bitconfig_7392))));
-}

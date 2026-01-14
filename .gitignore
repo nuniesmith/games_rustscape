@@ -1,5 +1,5 @@
 # ============================================================================
-# FKS Trading Systems - .gitignore
+# Rustscape - .gitignore
 # ============================================================================
 
 # ============================================================================
@@ -49,188 +49,85 @@ desktop.ini
 # Sublime Text
 *.sublime-*
 
-# Spyder
-.spyderproject
-.spyproject
-
-# Rope
-.ropeproject
-
 # ============================================================================
-# LANGUAGES & FRAMEWORKS
+# RUST
 # ============================================================================
-
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-# Python build directories (root level only to not block web builds)
-/build/
-develop-eggs/
-/dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-*.manifest
-*.spec
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Python testing & coverage
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
-.pytest_cache/
-cover/
-test-results/
-TestResults/
-
-# Python virtual environments
-.venv/
-venv/
-ENV/
-env/
-env.bak/
-venv.bak/
-.python-version
-__pypackages__/
-
-# Python package managers
-pdm.lock
-.pdm.toml
-.pdm-python
-.pdm-build/
-
-# Python type checking
-.mypy_cache/
-.dmypy.json
-dmypy.json
-.pyre/
-.pytype/
-
-# Python frameworks
-# Django
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
-# Flask
-instance/
-.webassets-cache
-# Scrapy
-.scrapy
-
-# Python documentation
-docs/_build/
-.pybuilder/
-
-# Python other
-*.mo
-*.pot
-celerybeat-schedule
-celerybeat.pid
-cython_debug/
-.kaggle/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-profile_default/
-ipython_config.py
-
-# SageMath
-*.sage.py
-
-# Rust
+# Build artifacts
 target/
-src/rust/**/target/
-src/rust/**/.cargo-cache/
-src/rust/**/debug/
-src/rust/**/release/
-src/rust/**/*.o
-src/rust/**/*.a
-src/rust/**/*.so
-src/rust/**/*.d
-src/rust/**/.fingerprint/
-Cargo.lock
-src/rust/**/Cargo.lock
+**/target/
+**/.cargo-cache/
+**/debug/
+**/release/
+**/*.o
+**/*.a
+**/*.so
+**/*.d
+**/.fingerprint/
 **/*.rs.bk
 
-# Keep server Cargo.lock (binary, not library)
+# Cargo.lock is committed for binaries, ignored for libraries
+# Our server is a binary, so we keep it
 !src/server/Cargo.lock
 
-# Node.js
+# ============================================================================
+# NODE.JS / TYPESCRIPT
+# ============================================================================
+# Dependencies
 node_modules/
-/.pnp
-.pnp.js
+
+# Build outputs
+src/client/web/dist/
+src/client/web/build/
+
+# Logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
 .pnpm-debug.log*
 
-# React/Web specific
-# Ignore React build outputs (generated artifacts)
-src/web/react/build/
-src/web/react/dist/
-# Keep public assets tracked (no ignore rule for public/)
+# pnp
+/.pnp
+.pnp.js
 
-# Production builds (but not web builds)
-/build/
-/dist/
-
-# Testing
+# Coverage
 /coverage/
 
-# .NET/C#
-bin/
-obj/
-*.dll
-*.pdb
-*.dll.config
-mono_crash.*
+# ============================================================================
+# PYTHON (for scripts)
+# ============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+ENV/
+env/
+.python-version
 
-# Keep reference DLLs
-!references/*.dll
+# ============================================================================
+# JAVA (legacy server)
+# ============================================================================
+*.class
+*.jar
+*.war
+*.ear
+.gradle/
 
 # ============================================================================
 # BUILD & DEPLOYMENT
 # ============================================================================
-# Build outputs
+# Build outputs (root level)
+/build/
+/dist/
 releases/
-build/output/
-build/temp/
-build/validation/
-temp_build/
 packages/*.zip
 packages/bin/
 
-# Docker
+# Docker (don't ignore docker-compose.yml or Dockerfiles)
 .docker/
-
-# CI/CD artifacts
-/config-output/
-/workflow-env/
-/workflow-marker/
 
 # ============================================================================
 # LOGS & DEBUGGING
@@ -244,16 +141,15 @@ debug/
 # ============================================================================
 # TEMPORARY & BACKUP FILES
 # ============================================================================
-# Backup files
-src_backup/
 *.bak
 *.orig
 *.tmp
 *.temp
 tmp/
 temp/
+src_backup/
 
-# Archives (except specific packages)
+# Archives
 *.zip
 *.tar.gz
 *.rar
@@ -266,12 +162,9 @@ temp/
 *.msp
 
 # ============================================================================
-# PROJECT SPECIFIC
+# ENVIRONMENT & SECRETS
 # ============================================================================
-secrets/
-.conda/
-
-# Environment files (do not commit real secrets)
+# Environment files (don't commit real secrets)
 .env
 .env.local
 .env.*.local
@@ -281,19 +174,43 @@ secrets/
 # Keep example/template envs tracked
 !.env.example
 !.env.template
+!.env.development.template
 !.env.production.template
-!.env.development
-!.env.staging
-!.env.gpu
-!.env.test
 
-# Data files
-*.csv
-projects/
-outputs/
+# Secrets directory
+secrets/
+
+# ============================================================================
+# PROJECT SPECIFIC
+# ============================================================================
+# Data directories (contain runtime data)
+data/backups/*
+!data/backups/.gitkeep
+
+# Analysis artifacts
+file_contents.txt
+codebase_analysis_report_*/
+codebase-analysis-report*/
+perf.json
+
+# Archive git repositories (reference only)
+archive/09launcher/
+archive/2009scape/
 
 # Syncthing
 .stfolder/
+
+# Local environment marker
+.local
+
+# SSH keys (should never be committed)
+*-ssh-keys
+*.pem
+*.key
+!config/ssl/*.key
+
+# Conda
+.conda/
 
 # ============================================================================
 # KEEP EMPTY DIRECTORIES
@@ -301,18 +218,4 @@ outputs/
 !packages/.gitkeep
 !build/.gitkeep
 !docs/.gitkeep
-
-fks-ssh-keys
-# Local environment marker
-.local
-
-# Archive git repositories (reference only, not part of this project)
-archive/09launcher/
-archive/2009scape/
-
-./data/backups/*
-# Analysis artifacts
-file_contents.txt
-codebase_analysis_report_*/
-codebase-analysis-report*/
-perf.json
+!data/.gitkeep

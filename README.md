@@ -4,175 +4,116 @@ A modern implementation of a 2009-era MMORPG game server and client, written in 
 
 ## Project Status
 
-**Server**: ✅ Rust implementation compiles and passes all 139 tests
-**Web Client**: 🔄 TypeScript client with WebSocket support (in progress)
-**Desktop Client**: 📋 Planned
-
-## Project Overview
-
-Rustscape aims to recreate the classic 2009 RuneScape experience using modern technologies:
-
-- **Server**: Rust (high-performance, memory-safe game server)
-- **Web Client**: TypeScript (browser-based client via WebSocket)
-- **Desktop Client**: Rust (cross-platform native client - planned)
-- **Mobile Client**: Kotlin KMP (iOS/Android - planned)
-
-## Project Structure
-
-```
-rustscape/
-├── src/
-│   ├── client/
-│   │   ├── desktop/       # Rust desktop client (planned)
-│   │   └── web/           # TypeScript browser client
-│   └── server/            # Rust game server
-│       └── src/
-│           ├── auth/      # Authentication service
-│           ├── cache/     # Cache file serving
-│           ├── crypto/    # ISAAC cipher, RSA encryption
-│           ├── game/      # World, player management
-│           ├── net/       # Networking, sessions, transport
-│           └── protocol/  # Handshake, JS5, Login, Game packets
-├── config/                # Configuration files
-│   ├── nginx/             # Nginx configuration
-│   ├── mysql/             # Database initialization
-│   └── ssl/               # SSL certificates
-├── docker/                # Docker build files
-│   ├── server/            # Java server (legacy)
-│   ├── server-rust/       # Rust server (new)
-│   ├── nginx/             # Nginx for Java server
-│   ├── nginx-rust/        # Nginx for Rust server
-│   └── client/            # Desktop client (noVNC)
-├── scripts/               # Utility scripts
-│   └── run-rust.sh        # Rust server stack manager
-├── archive/               # Legacy Java code (reference)
-├── run.sh                 # Docker environment manager
-└── docker-compose.yml     # Docker service definitions
-```
+- **Server**: ✅ Rust implementation compiles and passes all tests
+- **Web Client**: ✅ TypeScript client with WebSocket support and PixiJS rendering
+- **Desktop Client**: 📋 Planned
 
 ## Quick Start
 
 ### Prerequisites
 
 - Docker & Docker Compose
-- Node.js 18+ (for web client development)
-- Rust 1.70+ (for server development)
-
-### Building the Rust Server
-
-```bash
-cd src/server
-
-# Check compilation
-cargo check
-
-# Build release binary
-cargo build --release
-
-# Run tests
-cargo test
-
-# Run the server
-cargo run --release
-```
+- Node.js 20+ (for web client development)
+- Rust 1.85+ (for server development)
 
 ### Running with Docker
 
-The project supports two Docker profiles:
-
-- `rust` - Rust game server stack (recommended for new development)
-- `java` - Legacy Java game server stack
-- `all` - Both servers running simultaneously
-
-#### Rust Server Stack (Recommended)
-
 ```bash
-# Start Rust server stack
-./scripts/run-rust.sh start
-
-# Or using docker compose directly
-docker compose --profile rust up -d
-
-# View logs
-./scripts/run-rust.sh logs
-
-# Check status
-./scripts/run-rust.sh status
-
-# Stop services
-./scripts/run-rust.sh stop
-
-# Rebuild after code changes
-./scripts/run-rust.sh build
-```
-
-#### Legacy Java Server Stack
-
-```bash
-# Start Java server stack
+# Start the server stack
 ./run.sh start
 
-# Or using docker compose directly
-docker compose --profile java up -d
+# Or with dev tools (pgAdmin, Redis Commander)
+./run.sh dev
+
+# View logs
+./run.sh logs
+
+# Check status
+./run.sh status
+
+# Stop services
+./run.sh stop
 ```
 
 ### Access Points
 
-#### Rust Server Stack
-
 | Service | URL | Description |
 |---------|-----|-------------|
 | Web Client | http://localhost:8088 | Browser-based game client |
-| WebSocket (direct) | ws://localhost:43599 | Direct WebSocket connection |
-| WebSocket (proxied) | ws://localhost:8088/ws | Proxied through nginx |
-| Game Server (TCP) | localhost:43597 | Base game port |
-| Game Server (World 1) | localhost:43598 | World 1 game port |
+| WebSocket (proxied) | ws://localhost:8088/ws | Game connection via nginx |
+| WebSocket (direct) | ws://localhost:43599 | Direct WebSocket to server |
+| Game Server (TCP) | localhost:43597-43598 | Native client connections |
 | Management API | localhost:5556 | Server administration |
-| Database | localhost:3307 | MySQL database |
+| PostgreSQL | localhost:5433 | Database (dev access) |
+| Redis | localhost:6380 | Cache (dev access) |
 
-#### Java Server Stack (Legacy)
+### Dev Tools (with `./run.sh dev`)
 
-| Service | URL | Description |
-|---------|-----|-------------|
-| Web Client | http://localhost | Browser-based game client |
-| WebSocket | ws://localhost:43596 | WebSocket for web client |
-| Game Server (TCP) | localhost:43595 | World 1 game connection |
-| Management API | localhost:5555 | Server administration |
-| Desktop Client (noVNC) | http://localhost:6080 | VNC-based desktop client |
+| Tool | URL | Credentials |
+|------|-----|-------------|
+| pgAdmin | http://localhost:5050 | admin@rustscape.local / admin |
+| Redis Commander | http://localhost:8081 | - |
+
+## Project Structure
+
+```
+rustscape/
+├── src/
+│   ├── client/web/        # TypeScript browser client
+│   └── server/            # Rust game server
+├── config/
+│   ├── nginx/             # Nginx configuration
+│   ├── postgres/          # PostgreSQL initialization
+│   ├── redis/             # Redis configuration
+│   └── ssl/               # SSL certificates
+├── docker/
+│   ├── nginx/             # Nginx Dockerfile (builds web client)
+│   └── server/            # Rust server Dockerfile
+├── scripts/
+│   └── run.sh             # Server stack management
+├── cache/                 # Game cache files
+├── archive/               # Legacy Java code (reference only)
+├── run.sh                 # Main entry point
+└── docker-compose.yml     # Docker service definitions
+```
+
+## Technology Stack
+
+### Server
+- **Rust** - High-performance, memory-safe game server
+- **Tokio** - Async runtime for networking
+- **PostgreSQL** - Primary database for player data
+- **Redis** - Session caching and pub/sub
+
+### Web Client
+- **TypeScript** - Type-safe client code
+- **Vite** - Fast build tooling
+- **PixiJS** - 2D rendering engine
+
+### Infrastructure
+- **Docker Compose** - Container orchestration
+- **Nginx** - Reverse proxy and static file serving
 
 ## Server Architecture
 
-The Rust server implements the full game protocol:
-
 ### Network Stack
 - **TCP Transport**: Native client connections
-- **WebSocket Transport**: Browser client connections via tokio-tungstenite
-- **Unified Transport**: Abstraction layer for protocol handling
+- **WebSocket Transport**: Browser client connections
 - **Session Management**: Connection state, ISAAC cipher pairs
 
 ### Protocol Handlers
-- **Handshake**: Initial connection negotiation (opcodes 14, 15, 255)
+- **Handshake**: Initial connection negotiation
 - **JS5**: Cache file serving with priority queuing
-- **Login**: RSA-encrypted credential exchange, ISAAC setup
+- **Login**: RSA-encrypted credential exchange
 - **Game**: In-game packet handling
 
 ### Cryptography
-- **ISAAC Cipher**: Stream cipher for packet encryption/decryption
+- **ISAAC Cipher**: Stream cipher for packet encryption
 - **RSA**: Public key encryption for login credentials
-
-### Authentication
-- **In-Memory Auth**: Development mode (auto-accepts all logins)
-- **Argon2 Hashing**: Secure password storage
-- **Player Index**: Allocation and release for concurrent players
-
-### Game Systems
-- **World**: Game tick loop (600ms), player management
-- **Players**: Index allocation, state tracking
-- **Cache**: File serving with compression support (GZIP, BZIP2, LZMA)
 
 ## Configuration
 
-Server configuration is in `config/server.toml`:
+### Server Configuration (`config/server.toml`)
 
 ```toml
 server_name = "Rustscape"
@@ -180,274 +121,144 @@ world_id = 1
 game_port = 43594
 websocket_port = 43596
 management_port = 5555
-cache_path = "./data/cache"
-tick_rate_ms = 600
-max_players = 2000
 dev_mode = true
 
 [database]
+type = "postgres"
 host = "localhost"
-port = 3306
+port = 5432
 database = "rustscape"
 username = "rustscape"
-password = ""
+password = "rustscape_dev_password"
 
-[rsa]
-modulus = "<hex>"
-private_exponent = "<hex>"
-public_exponent = 65537
+[redis]
+host = "localhost"
+port = 6379
+
+[auth]
+registration_enabled = true
+min_password_length = 6
+bcrypt_cost = 12
 ```
 
 ### Environment Variables
 
-The server supports extensive environment variable configuration:
-
 ```bash
-# Server configuration
-RUSTSCAPE_CONFIG=./config/server.toml
-RUSTSCAPE_SERVER_NAME=Rustscape
-RUSTSCAPE_WORLD_ID=1
-RUSTSCAPE_GAME_PORT=43594
-RUSTSCAPE_WEBSOCKET_PORT=43596
-RUSTSCAPE_MANAGEMENT_PORT=5555
+# Server
+RUST_LOG=info,rustscape_server=debug
 RUSTSCAPE_DEV_MODE=true
-RUSTSCAPE_DEBUG=true
+RUSTSCAPE_WORLD_ID=1
 
-# Database (RUSTSCAPE_DATABASE_* takes precedence over MYSQL_*)
-RUSTSCAPE_DATABASE_HOST=localhost
-RUSTSCAPE_DATABASE_PORT=3306
-RUSTSCAPE_DATABASE_NAME=rustscape
+# PostgreSQL
+RUSTSCAPE_DATABASE_HOST=postgres
+RUSTSCAPE_DATABASE_PORT=5432
 RUSTSCAPE_DATABASE_USER=rustscape
-RUSTSCAPE_DATABASE_PASSWORD=secret
+RUSTSCAPE_DATABASE_PASSWORD=rustscape_dev_password
+RUSTSCAPE_DATABASE_NAME=rustscape
 
-# Or use MYSQL_* variables
-MYSQL_HOST=localhost
-MYSQL_USER=rustscape
-MYSQL_PASSWORD=secret
-MYSQL_DATABASE=rustscape
-
-# RSA keys (production only)
-RUSTSCAPE_RSA_MODULUS=<hex>
-RUSTSCAPE_RSA_PRIVATE_EXPONENT=<hex>
+# Redis
+RUSTSCAPE_REDIS_HOST=redis
+RUSTSCAPE_REDIS_PORT=6379
 ```
 
-## Web Client Development
+## Development
 
-```bash
-cd src/client/web
-
-# Install dependencies
-npm install
-
-# Start development server
-npm run dev -- --host
-
-# Build for production
-npm run build
-
-# Run WebSocket tests
-node scripts/test-websocket.js localhost 43596
-```
-
-## Docker Configuration
-
-### Docker Compose Profiles
-
-The `docker-compose.yml` uses profiles to manage different server configurations:
-
-```yaml
-# Rust server stack
-docker compose --profile rust up -d
-
-# Java server stack (legacy)
-docker compose --profile java up -d
-
-# Both servers (for migration testing)
-docker compose --profile all up -d
-```
-
-### Services by Profile
-
-| Service | Profile | Description |
-|---------|---------|-------------|
-| `rust-server` | rust, all | Rust game server |
-| `nginx-rust` | rust, all | Nginx for Rust server (port 8088) |
-| `app` | java, all | Java game server (legacy) |
-| `nginx` | java, all | Nginx for Java server (port 80) |
-| `client` | java, all | Desktop client via noVNC |
-| `database` | (always) | MySQL database |
-
-### Building Images
-
-```bash
-# Build Rust server only
-docker compose --profile rust build rust-server
-
-# Build all Rust profile services
-docker compose --profile rust build
-
-# Rebuild from scratch (no cache)
-docker compose --profile rust build --no-cache
-```
-
-## Port Configuration
-
-### Rust Server Stack
-
-| Port | Service |
-|------|---------|
-| 43597 | Base game server port (host) → 43594 (container) |
-| 43598 | World 1 game port (host) → 43595 (container) |
-| 43599 | WebSocket server (host) → 43596 (container) |
-| 5556 | Management API (host) → 5555 (container) |
-| 8088 | Nginx web client |
-| 3307 | MySQL (external port) |
-
-### Java Server Stack
-
-| Port | Service |
-|------|---------|
-| 43594 | Base game server port |
-| 43595 | World 1 game port |
-| 43596 | WebSocket server |
-| 5555 | Management API |
-| 80 | Nginx web client |
-| 6080 | noVNC desktop client |
-| 3306 | MySQL |
-
-## Development Roadmap
-
-### Phase 1: Infrastructure ✅
-- [x] Docker environment setup
-- [x] WebSocket bridge architecture
-- [x] Web client foundation
-- [x] Rust server skeleton
-
-### Phase 2: Protocol Implementation ✅
-- [x] PacketBuffer with RS-specific encodings
-- [x] ISAAC cipher (with tests)
-- [x] RSA encryption/decryption
-- [x] Handshake handler
-- [x] JS5 handler with queue
-- [x] Login handler
-- [x] Login initialization packets
-
-### Phase 3: Network Layer ✅
-- [x] TCP transport
-- [x] WebSocket transport
-- [x] Unified transport abstraction
-- [x] Session management
-- [x] Connection handler
-
-### Phase 4: Authentication ✅
-- [x] In-memory auth service
-- [x] Argon2 password hashing
-- [x] Player index allocation
-- [x] Dev mode auto-accept
-
-### Phase 5: Docker Integration ✅
-- [x] Rust server Dockerfile
-- [x] Docker Compose profiles
-- [x] Nginx WebSocket proxy
-- [x] Startup scripts
-
-### Phase 6: Cache System (In Progress)
-- [x] Cache store (stub implementation)
-- [ ] Real Jagex cache parsing
-- [ ] GZIP/BZIP2/LZMA decompression
-- [ ] Reference table parsing
-
-### Phase 7: Game Systems (Planned)
-- [x] World tick loop (stub)
-- [x] Player manager (stub)
-- [ ] Full player state
-- [ ] NPC system
-- [ ] Map regions
-- [ ] Combat system
-
-### Phase 8: Database Integration (Planned)
-- [ ] MySQL account authentication
-- [ ] Player persistence
-- [ ] World state
-
-## Legacy Reference Code
-
-The `archive/` directory contains the original implementations:
-
-- **java-server/**: Full 2009scape server in Kotlin/Java
-  - NioReactor networking
-  - EventProducer pattern
-  - Complete game logic
-- **09launcher/**: Kotlin launcher with auto-update
-- **java-launcher/**: Original Java launcher
-
-These serve as reference for protocol details and game logic.
-
-## Scripts
-
-### run-rust.sh Commands
-
-```bash
-./scripts/run-rust.sh start     # Start the Rust server stack
-./scripts/run-rust.sh stop      # Stop the Rust server stack
-./scripts/run-rust.sh restart   # Restart the Rust server stack
-./scripts/run-rust.sh logs      # View logs from all services
-./scripts/run-rust.sh status    # Show status of all services
-./scripts/run-rust.sh build     # Rebuild the Rust server image
-./scripts/run-rust.sh clean     # Stop and remove all containers/volumes
-```
-
-### run.sh Commands (Legacy)
-
-```bash
-./run.sh start [service]     # Start services
-./run.sh stop [service]      # Stop services
-./run.sh restart [service]   # Restart services
-./run.sh build [service]     # Build images
-./run.sh deploy              # Build and start all
-./run.sh logs [service]      # View logs
-./run.sh status              # Show service status
-./run.sh exec <svc> [cmd]    # Execute command in container
-./run.sh test:ws [host] [port] # Test WebSocket connection
-./run.sh clean               # Remove all containers/images/volumes
-```
-
-## Testing
-
-The Rust server has comprehensive test coverage:
+### Building the Rust Server Locally
 
 ```bash
 cd src/server
+cargo build --release
 cargo test
-
-# Current: 139 tests passing
+cargo run --release
 ```
 
-Test coverage includes:
-- ISAAC cipher operations
-- RSA encryption/decryption
-- PacketBuffer read/write operations
-- Bit access modes
-- Session management
-- Protocol handlers
-- Authentication service
-- Login initialization
-- World/player management
+### Web Client Development
 
-## Contributing
+```bash
+cd src/client/web
+npm install
+npm run dev -- --host  # Dev server at http://localhost:5173
+npm run build          # Production build
+```
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run `cargo test` and `cargo clippy`
-5. Submit a pull request
+### Docker Commands
+
+```bash
+# Start services
+./run.sh start
+
+# Start with dev tools
+./run.sh dev
+
+# View logs
+./run.sh logs
+
+# Check status
+./run.sh status
+
+# Rebuild images
+./run.sh build
+
+# Stop services
+./run.sh stop
+
+# Clean up (removes volumes)
+./run.sh clean
+```
+
+## Docker Services
+
+| Service | Description |
+|---------|-------------|
+| `postgres` | PostgreSQL 16 database |
+| `redis` | Redis 7 cache |
+| `server` | Rust game server |
+| `nginx` | Web client + reverse proxy |
+| `pgadmin` | PostgreSQL admin (dev profile) |
+| `redis-commander` | Redis admin (dev profile) |
+
+## Database Schema
+
+The PostgreSQL schema includes:
+- `users` - User accounts and authentication
+- `sessions` - Active sessions
+- `players` - Player characters
+- `player_skills` - Skill levels and XP
+- `player_inventory` - Item storage
+- `worlds` - World/server configuration
+- `audit_logs` - Security audit trail
+
+Default test users:
+- `admin` / `admin123` (admin rights)
+- `testuser` / `test123` (regular user)
+
+## Testing
+
+```bash
+cd src/server
+cargo test  # Run all tests
+```
+
+## Roadmap
+
+- [x] Docker infrastructure (PostgreSQL, Redis, Nginx)
+- [x] Rust server with WebSocket support
+- [x] Protocol implementation (handshake, login, JS5)
+- [x] TypeScript web client with PixiJS
+- [x] Database schema and migrations
+- [x] Server-side auth API endpoints (Axum REST API with JWT, PostgreSQL, Redis)
+- [x] ISAAC cipher in web client (packet opcode encryption/decryption)
+- [x] Asset pipeline (sprite extraction CLI tool, nginx serving, manifests)
+- [x] Full game packet parsing (incoming/outgoing packet handlers)
+- [x] Player persistence (PostgreSQL save/load for skills, inventory, position)
+
+## Archive
+
+The `archive/` directory contains legacy Java implementations for reference:
+- Protocol details
+- Game logic
+- Database schemas
 
 ## License
 
 MIT License - See [LICENSE](LICENSE) for details.
-
-## Acknowledgments
-
-- Original 2009scape project for reference implementation
-- RuneScape protocol documentation community
-- Rust async ecosystem (tokio, tungstenite)

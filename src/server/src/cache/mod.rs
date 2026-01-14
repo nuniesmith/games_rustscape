@@ -31,6 +31,8 @@
 //! - Byte 7: Index ID
 //! - Bytes 8-519: Data (512 bytes)
 
+pub mod sprites;
+
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -39,9 +41,9 @@ use std::sync::RwLock;
 
 use bzip2::read::BzDecoder;
 use flate2::read::GzDecoder;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, info, trace, warn};
 
-use crate::error::{CacheError, Result, RustscapeError};
+use crate::error::Result;
 
 /// Number of cache indices (0-28 for revision 530)
 pub const INDEX_COUNT: usize = 29;

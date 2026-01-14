@@ -1,4 +1,0 @@
-void script_1171() {
-	setWidgetSize(100, 90, 0, 0, new WidgetPointer(601,0));
-	return;
-}

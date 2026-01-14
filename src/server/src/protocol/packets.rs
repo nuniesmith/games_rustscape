@@ -447,10 +447,10 @@ mod tests {
 
     #[test]
     fn test_keepalive_decode() {
-        let mut buffer = PacketBuffer::new();
-        let packet = KeepAlivePacket::decode(&mut buffer).unwrap();
-        assert_eq!(KeepAlivePacket::OPCODE, 0);
-    }
+            let mut buffer = PacketBuffer::new();
+            let _packet = KeepAlivePacket::decode(&mut buffer).unwrap();
+            assert_eq!(KeepAlivePacket::OPCODE, 0);
+        }
 
     #[test]
     fn test_focus_change_decode() {

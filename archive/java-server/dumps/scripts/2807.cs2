@@ -1,5 +1,0 @@
-void script_2807(int arg0) {
-	cs2method2103(255, new WidgetPointer(arg0));
-	setScriptCallOnGameloop(-1, "", new WidgetPointer(arg0));
-	return;
-}

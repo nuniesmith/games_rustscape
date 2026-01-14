@@ -1,28 +1,61 @@
+# Rustscape Docker Compose Configuration
+#
+# This file uses environment variables from .env file.
+# Run ./run.sh init to generate the .env file with secure credentials.
+
 services:
-    # Rust Game Server (new implementation)
-    rust-server:
+    # ===========================================
+    # RUST SERVER STACK
+    # ===========================================
+
+    # Rust Game Server
+    server:
         build:
             context: .
-            dockerfile: ./docker/server-rust/Dockerfile
-        container_name: "rustscape_rust_server"
+            dockerfile: ./docker/server/Dockerfile
+        container_name: "rustscape_server"
         depends_on:
-            database:
+            postgres:
+                condition: service_healthy
+            redis:
                 condition: service_healthy
         restart: unless-stopped
         volumes:
-            - "rustscape_rust_data:/app/data"
-            - "rustscape_rust_logs:/app/logs"
+            - "rustscape_server_data:/app/data"
+            - "rustscape_server_logs:/app/logs"
+            - "rustscape_cache:/app/data/cache"
+            - "rustscape_sprites:/app/data/extracted/sprites"
         environment:
-            - TZ=America/New_York
-            - RUST_LOG=info,rustscape_server=debug
-            - RUSTSCAPE_DEV_MODE=true
-            - RUSTSCAPE_DATABASE_HOST=database
-            - RUSTSCAPE_DATABASE_PORT=3306
-            - RUSTSCAPE_DATABASE_USER=jordan
-            - RUSTSCAPE_DATABASE_PASSWORD=123456
-            - RUSTSCAPE_DATABASE_NAME=rustscape
+            TZ: ${TZ:-America/New_York}
+            RUST_LOG: ${RUST_LOG:-info,rustscape_server=debug}
+            RUSTSCAPE_DEV_MODE: ${RUSTSCAPE_DEV_MODE:-true}
+            # PostgreSQL
+            RUSTSCAPE_DATABASE_TYPE: ${RUSTSCAPE_DATABASE_TYPE:-postgres}
+            RUSTSCAPE_DATABASE_HOST: ${RUSTSCAPE_DATABASE_HOST:-postgres}
+            RUSTSCAPE_DATABASE_PORT: ${RUSTSCAPE_DATABASE_PORT:-5432}
+            RUSTSCAPE_DATABASE_USER: ${RUSTSCAPE_DATABASE_USER:-rustscape}
+            RUSTSCAPE_DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
+            RUSTSCAPE_DATABASE_NAME: ${RUSTSCAPE_DATABASE_NAME:-rustscape}
+            # Redis
+            RUSTSCAPE_REDIS_HOST: ${RUSTSCAPE_REDIS_HOST:-redis}
+            RUSTSCAPE_REDIS_PORT: ${RUSTSCAPE_REDIS_PORT:-6379}
+            RUSTSCAPE_REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+            # JWT Authentication
+            RUSTSCAPE_JWT_SECRET: ${RUSTSCAPE_JWT_SECRET}
+            RUSTSCAPE_JWT_ACCESS_EXPIRY: ${RUSTSCAPE_JWT_ACCESS_EXPIRY:-86400}
+            RUSTSCAPE_JWT_REFRESH_EXPIRY: ${RUSTSCAPE_JWT_REFRESH_EXPIRY:-604800}
+            # Authentication settings
+            RUSTSCAPE_AUTH_REGISTRATION_ENABLED: ${RUSTSCAPE_AUTH_REGISTRATION_ENABLED:-true}
+            RUSTSCAPE_AUTH_MIN_PASSWORD_LENGTH: ${RUSTSCAPE_AUTH_MIN_PASSWORD_LENGTH:-6}
+            RUSTSCAPE_AUTH_MAX_LOGIN_ATTEMPTS: ${RUSTSCAPE_AUTH_MAX_LOGIN_ATTEMPTS:-5}
+            RUSTSCAPE_AUTH_LOCKOUT_DURATION: ${RUSTSCAPE_AUTH_LOCKOUT_DURATION:-900}
+            RUSTSCAPE_AUTH_BCRYPT_COST: ${RUSTSCAPE_AUTH_BCRYPT_COST:-12}
+            # Server settings
+            RUSTSCAPE_WORLD_ID: ${RUSTSCAPE_WORLD_ID:-1}
+            RUSTSCAPE_WORLD_NAME: ${RUSTSCAPE_WORLD_NAME:-Rustscape}
+            RUSTSCAPE_MAX_PLAYERS: ${RUSTSCAPE_MAX_PLAYERS:-2000}
         ports:
-            - "43597:43594" # Base game port (offset to avoid conflict with Java server)
+            - "43597:43594" # Base game port
             - "43598:43595" # World 1 game port
             - "43599:43596" # WebSocket port
             - "5556:5555" # Management API
@@ -39,136 +72,8 @@ services:
                 limits:
                     cpus: "4"
                     memory: 2G
-        profiles:
-            - rust
-            - all
 
-    # Game server (Java - legacy)
-    app:
-        build:
-            context: .
-            dockerfile: ./docker/server/Dockerfile
-        container_name: "rustscape_app"
-        depends_on:
-            database:
-                condition: service_healthy
-        restart: unless-stopped
-        volumes:
-            - "rustscape_app_data:/app/rustscape/data"
-            - "rustscape_app_logs:/app/rustscape/logs"
-            - "./config/mysql/init:/docker-entrypoint-initdb.d:ro"
-        environment:
-            - TZ=America/New_York
-            - MYSQL_HOST=database
-            - MYSQL_USER=jordan
-            - MYSQL_PASSWORD=123456
-            - MYSQL_DATABASE=global
-            - JAVA_OPTS=-Xmx6G -Xms1G -XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200
-        ports:
-            - "43594:43594" # Base game port
-            - "43595:43595" # World 1 game port
-            - "43596:43596" # WebSocket port
-            - "5555:5555" # Management API
-        networks:
-            - rustscape_network
-        healthcheck:
-            test: ["CMD", "nc", "-z", "localhost", "43594"]
-            interval: 30s
-            timeout: 10s
-            start_period: 120s
-            retries: 5
-        deploy:
-            resources:
-                limits:
-                    cpus: "8"
-                    memory: 8G
-        profiles:
-            - java
-            - all
-
-    # Database service
-    database:
-        image: mysql:8.0
-        container_name: "rustscape_db"
-        restart: always
-        ports:
-            - "3307:3306"
-        volumes:
-            - "rustscape_db:/var/lib/mysql"
-            - "./config/mysql/init:/docker-entrypoint-initdb.d:ro"
-        environment:
-            - TZ=America/New_York
-            - MYSQL_ROOT_PASSWORD=root
-            - MYSQL_USER=jordan
-            - MYSQL_PASSWORD=123456
-            - MYSQL_DATABASE=global
-            - MYSQL_ROOT_HOST=%
-        networks:
-            - rustscape_network
-        healthcheck:
-            test:
-                [
-                    "CMD",
-                    "mysqladmin",
-                    "ping",
-                    "-h",
-                    "localhost",
-                    "-ujordan",
-                    "-p123456",
-                ]
-            interval: 30s
-            timeout: 10s
-            retries: 5
-        deploy:
-            resources:
-                limits:
-                    cpus: "1"
-                    memory: 1G
-        command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
-
-    # Desktop client service (noVNC)
-    client:
-        build:
-            context: .
-            dockerfile: ./docker/client/Dockerfile
-        container_name: "rustscape_client"
-        restart: unless-stopped
-        depends_on:
-            app:
-                condition: service_healthy
-        ports:
-            - "8080:8080" # WebSocket port (for client)
-            - "6080:6080" # noVNC web interface
-            - "5900:5900" # VNC port
-        volumes:
-            - "./config:/app/config"
-        environment:
-            - TZ=America/New_York
-            - SERVER_HOST=app
-            - SERVER_PORT=43594
-            - RUSTSCAPE_SERVER_HOST=app
-            - RUSTSCAPE_SERVER_PORT=43594
-            - RUSTSCAPE_WEBSOCKET_PORT=8080
-            - DISPLAY=:1
-            - VNC_PASSWORD=password
-        networks:
-            - rustscape_network
-        healthcheck:
-            test: ["CMD", "nc", "-z", "localhost", "6080"]
-            interval: 30s
-            timeout: 10s
-            start_period: 60s
-            retries: 3
-        deploy:
-            resources:
-                limits:
-                    cpus: "4"
-                    memory: 4G
-        profiles:
-            - java
-            - all
-
-    # Web server for browser client (points to Java server)
+    # Web server for browser client (nginx)
     nginx:
         build:
             context: .
@@ -176,9 +81,17 @@ services:
         container_name: "rustscape_nginx"
         restart: unless-stopped
         depends_on:
-            - app
+            server:
+                condition: service_healthy
         ports:
-            - "80:80"
+            - "${NGINX_HTTP_PORT:-8088}:80"
+            - "${NGINX_HTTPS_PORT:-8443}:443"
+        volumes:
+            - "rustscape_cache:/usr/share/nginx/html/assets/cache:ro"
+            - "rustscape_sprites:/usr/share/nginx/html/sprites:ro"
+        environment:
+            GAME_SERVER_HOST: server
+            GAME_SERVER_WS_PORT: 43596
         networks:
             - rustscape_network
         healthcheck:
@@ -190,57 +103,127 @@ services:
         deploy:
             resources:
                 limits:
-                    cpus: "0.5"
+                    cpus: "1"
                     memory: 512M
-        profiles:
-            - java
-            - all
 
-    # Web server for browser client (points to Rust server)
-    nginx-rust:
-        build:
-            context: .
-            dockerfile: ./docker/nginx-rust/Dockerfile
-        container_name: "rustscape_nginx_rust"
+    # ===========================================
+    # CORE INFRASTRUCTURE
+    # ===========================================
+
+    # PostgreSQL Database (primary data store)
+    postgres:
+        image: postgres:16-alpine
+        container_name: "rustscape_postgres"
+        restart: unless-stopped
+        ports:
+            - "${POSTGRES_EXTERNAL_PORT:-5433}:5432"
+        volumes:
+            - "rustscape_postgres_data:/var/lib/postgresql/data"
+            - "./config/postgres/init:/docker-entrypoint-initdb.d:ro"
+        environment:
+            TZ: ${TZ:-America/New_York}
+            POSTGRES_USER: ${POSTGRES_USER:-rustscape}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+            POSTGRES_DB: ${POSTGRES_DB:-rustscape}
+        networks:
+            - rustscape_network
+        healthcheck:
+            test:
+                [
+                    "CMD-SHELL",
+                    "pg_isready -U $${POSTGRES_USER:-rustscape} -d $${POSTGRES_DB:-rustscape}",
+                ]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+        deploy:
+            resources:
+                limits:
+                    cpus: "2"
+                    memory: 1G
+
+    # Redis Cache (sessions, caching, pub/sub)
+    redis:
+        image: redis:7-alpine
+        container_name: "rustscape_redis"
+        restart: unless-stopped
+        ports:
+            - "${REDIS_EXTERNAL_PORT:-6380}:6379"
+        volumes:
+            - "rustscape_redis_data:/data"
+            - "./config/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro"
+        command: redis-server /usr/local/etc/redis/redis.conf
+        environment:
+            TZ: ${TZ:-America/New_York}
+        networks:
+            - rustscape_network
+        healthcheck:
+            test: ["CMD", "redis-cli", "ping"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+        deploy:
+            resources:
+                limits:
+                    cpus: "1"
+                    memory: 512M
+
+    # ===========================================
+    # DEVELOPMENT TOOLS
+    # ===========================================
+
+    # pgAdmin for PostgreSQL management
+    pgadmin:
+        image: dpage/pgadmin4:latest
+        container_name: "rustscape_pgadmin"
         restart: unless-stopped
         depends_on:
-            - rust-server
+            postgres:
+                condition: service_healthy
         ports:
-            - "8088:80"
+            - "${PGADMIN_PORT:-5050}:80"
         environment:
-            - GAME_SERVER_HOST=rust-server
-            - GAME_SERVER_WS_PORT=43596
+            PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@rustscape.local}
+            PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+            PGADMIN_CONFIG_SERVER_MODE: "False"
+        volumes:
+            - "rustscape_pgadmin_data:/var/lib/pgadmin"
         networks:
             - rustscape_network
-        healthcheck:
-            test: ["CMD", "curl", "-f", "http://localhost/health"]
-            interval: 30s
-            timeout: 10s
-            start_period: 10s
-            retries: 3
-        deploy:
-            resources:
-                limits:
-                    cpus: "0.5"
-                    memory: 512M
         profiles:
-            - rust
-            - all
+            - dev
+
+    # Redis Commander for Redis management
+    redis-commander:
+        image: rediscommander/redis-commander:latest
+        container_name: "rustscape_redis_commander"
+        restart: unless-stopped
+        depends_on:
+            redis:
+                condition: service_healthy
+        ports:
+            - "${REDIS_COMMANDER_PORT:-8081}:8081"
+        environment:
+            REDIS_HOSTS: local:redis:6379
+        networks:
+            - rustscape_network
+        profiles:
+            - dev
 
 # Named volumes for persistent data
 volumes:
-    rustscape_app_data:
-    rustscape_app_logs:
-    rustscape_rust_data:
-    rustscape_rust_logs:
-    rustscape_db:
-    rustscape_client_config:
+    # Infrastructure
+    rustscape_postgres_data:
+    rustscape_redis_data:
+    rustscape_pgadmin_data:
+    # Server
+    rustscape_server_data:
+    rustscape_server_logs:
+    # Shared game assets (server writes, nginx reads)
+    rustscape_cache:
+    rustscape_sprites:
 
 # Docker network
 networks:
     rustscape_network:
         driver: bridge
-        ipam:
-            driver: default
-            config:
-                - subnet: 172.30.0.0/16

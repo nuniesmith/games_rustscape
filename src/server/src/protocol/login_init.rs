@@ -122,12 +122,12 @@ impl InitialPlayerState {
 
     /// Get local X within region (0-103)
     pub fn local_x(&self) -> u8 {
-        ((self.x - ((self.region_x() - 6) * 8)) as u8)
+        (self.x - ((self.region_x() - 6) * 8)) as u8
     }
 
     /// Get local Y within region (0-103)
     pub fn local_y(&self) -> u8 {
-        ((self.y - ((self.region_y() - 6) * 8)) as u8)
+        (self.y - ((self.region_y() - 6) * 8)) as u8
     }
 }
 
@@ -406,9 +406,9 @@ pub fn build_player_update(state: &InitialPlayerState) -> Vec<u8> {
     // This is a minimal implementation
 
     // Start with update flags
-    let local_x = state.local_x();
-    let local_y = state.local_y();
-    let height = state.z;
+    let _local_x = state.local_x();
+    let _local_y = state.local_y();
+    let _height = state.z;
 
     // For initial login, we need to teleport the player
     // Teleport flag requires: height (2 bits), x (7 bits), y (7 bits)

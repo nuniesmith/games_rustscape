@@ -6,6 +6,7 @@
 //! - Message routing based on connection state
 //! - RSA decryption and ISAAC cipher initialization
 //! - Game packet processing with ISAAC decryption
+//! - Player persistence (load on login, save on disconnect)
 //! - Graceful disconnection
 
 use std::net::SocketAddr;
@@ -14,12 +15,14 @@ use std::sync::Arc;
 use crate::error::Result;
 use tokio::net::TcpStream;
 use tokio_tungstenite::accept_async;
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
+use uuid::Uuid;
 
 use crate::crypto::IsaacPair;
 use crate::error::{
     AuthError, Js5Response, LoginResponse, NetworkError, ProtocolError, RustscapeError,
 };
+use crate::game::player::PlayerRights;
 use crate::net::buffer::PacketBuffer;
 use crate::net::session::{ClientInfo, SessionState};
 use crate::net::transport::{BufferedTransport, UnifiedTransport};
@@ -27,20 +30,20 @@ use crate::protocol::game::{GamePacketHandler, IncomingGamePacket, INCOMING_PACK
 use crate::protocol::handshake::HandshakeOpcode;
 use crate::protocol::login::LoginType;
 use crate::protocol::login_init;
-use crate::AppState;
+use crate::state::AppState;
 use crate::REVISION;
 
 /// Maximum packet size (64KB)
 const MAX_PACKET_SIZE: usize = 65535;
 
 /// Read timeout in seconds
-const READ_TIMEOUT_SECS: u64 = 30;
 
 /// Connection handler for processing client connections
 pub struct ConnectionHandler {
     /// Shared application state
     state: Arc<AppState>,
     /// Whether this handler expects WebSocket connections
+    #[allow(dead_code)]
     is_websocket: bool,
 }
 
@@ -116,20 +119,9 @@ impl ConnectionHandler {
         // Main processing loop
         let result = self.process_connection(&mut transport, session_id).await;
 
-        // Cleanup
+        // Cleanup - save player and release resources
         debug!(session_id = session_id, "Connection handler ending");
-
-        // Release player index if the session had one
-        if let Some(session) = self.state.session_manager.get(session_id) {
-            if let Some(player_index) = session.player_index() {
-                self.state.auth.release_player_index(player_index);
-                debug!(
-                    session_id = session_id,
-                    player_index = player_index,
-                    "Released player index"
-                );
-            }
-        }
+        self.cleanup_session(session_id).await;
 
         self.state.session_manager.remove(session_id);
 
@@ -496,7 +488,7 @@ impl ConnectionHandler {
 
             // Write data with block markers every 512 bytes
             let mut offset = 0;
-            for (i, &byte) in data.iter().enumerate() {
+            for (_i, &byte) in data.iter().enumerate() {
                 if offset == 512 {
                     response.write_ubyte(0xFF); // Block marker
                     offset = 1;
@@ -683,8 +675,8 @@ impl ConnectionHandler {
             return Err(RustscapeError::Auth(AuthError::AlreadyLoggedIn));
         }
 
-        // Authenticate with auth service
-        let auth_result = match self.state.auth.authenticate(&username, &password) {
+        // Authenticate with auth service (use async DB auth if available)
+        let auth_result = match self.state.auth.authenticate_db(&username, &password).await {
             Ok(result) => result,
             Err(e) => {
                 let response_code = match e {
@@ -711,6 +703,100 @@ impl ConnectionHandler {
 
         if let Some(info) = client_info {
             session.set_client_info(info);
+        }
+
+        // Convert rights for player registration
+        let player_rights = PlayerRights::from_u8(auth_result.account.rights);
+        let is_member = auth_result.account.member;
+
+        // Load or create player data from persistence (if available)
+        if let Some(persistence) = self.state.persistence() {
+            // Use the real user_id from database auth, or fall back to generated UUID
+            let user_id = auth_result
+                .user_id()
+                .unwrap_or_else(|| Uuid::new_v5(&Uuid::NAMESPACE_OID, username.as_bytes()));
+
+            match persistence.load_or_create(user_id, username.clone()).await {
+                Ok(player_data) => {
+                    // Register player with the game world from persisted data
+                    match self.state.world.players.register_from_data(
+                        session_id,
+                        &player_data,
+                        player_rights,
+                        is_member,
+                    ) {
+                        Ok(player) => {
+                            self.state.world.increment_player_count();
+                            info!(
+                                session_id = session_id,
+                                username = %username,
+                                player_index = player.index,
+                                player_id = %player_data.id,
+                                "Player loaded from database"
+                            );
+                        }
+                        Err(e) => {
+                            warn!(
+                                session_id = session_id,
+                                username = %username,
+                                error = %e,
+                                "Failed to register player, using memory-only mode"
+                            );
+                            // Fall back to memory-only player
+                            if let Err(e2) = self
+                                .state
+                                .world
+                                .players
+                                .register(session_id, username.clone())
+                            {
+                                warn!(error = %e2, "Fallback registration also failed");
+                            } else {
+                                self.state.world.increment_player_count();
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        session_id = session_id,
+                        username = %username,
+                        error = %e,
+                        "Failed to load player data, using memory-only mode"
+                    );
+                    // Fall back to memory-only player
+                    if let Err(e2) = self
+                        .state
+                        .world
+                        .players
+                        .register(session_id, username.clone())
+                    {
+                        warn!(error = %e2, "Fallback registration also failed");
+                    } else {
+                        self.state.world.increment_player_count();
+                    }
+                }
+            }
+        } else {
+            // No persistence - create memory-only player
+            match self
+                .state
+                .world
+                .players
+                .register(session_id, username.clone())
+            {
+                Ok(player) => {
+                    self.state.world.increment_player_count();
+                    debug!(
+                        session_id = session_id,
+                        username = %username,
+                        player_index = player.index,
+                        "Player registered (no persistence)"
+                    );
+                }
+                Err(e) => {
+                    warn!(error = %e, "Failed to register player (no persistence)");
+                }
+            }
         }
 
         // Send success response
@@ -755,6 +841,12 @@ impl ConnectionHandler {
 
     /// Decrypt the RSA block from login packet
     fn decrypt_rsa_block(&self, encrypted: &[u8]) -> Result<Vec<u8>> {
+        // In dev mode, skip RSA decryption entirely and treat as plaintext
+        if self.state.config.dev_mode {
+            debug!("Dev mode enabled, treating login block as plaintext (no RSA decryption)");
+            return Ok(encrypted.to_vec());
+        }
+
         if let Some(rsa) = &self.state.rsa {
             // Use RSA decryption
             rsa.decrypt_login_block(encrypted).map_err(|e| {
@@ -762,8 +854,8 @@ impl ConnectionHandler {
                 RustscapeError::Protocol(ProtocolError::RsaDecryptionFailed)
             })
         } else {
-            // Dev mode - treat as plaintext
-            debug!("RSA not configured, treating login block as plaintext (dev mode)");
+            // No RSA configured - treat as plaintext
+            debug!("RSA not configured, treating login block as plaintext");
             Ok(encrypted.to_vec())
         }
     }
@@ -963,5 +1055,91 @@ impl ConnectionHandler {
         transport.write(&[response]).await?;
         transport.flush().await?;
         Ok(())
+    }
+
+    /// Cleanup session resources - save player data and release indices
+    async fn cleanup_session(&self, session_id: u64) {
+        // Get session info before cleanup
+        let (username, player_index) =
+            if let Some(session) = self.state.session_manager.get(session_id) {
+                (
+                    session.username().map(|s| s.to_string()),
+                    session.player_index(),
+                )
+            } else {
+                return;
+            };
+
+        // Save player data if persistence is enabled
+        if let Some(username) = &username {
+            if let Some(player) = self.state.world.players.get_by_username(username) {
+                // Get user_id from player data if available, otherwise generate from username
+                let user_id = player
+                    .user_id
+                    .unwrap_or_else(|| Uuid::new_v5(&Uuid::NAMESPACE_OID, username.as_bytes()));
+
+                if let Some(persistence) = self.state.persistence() {
+                    // Try to load existing player to get the player_id
+                    match persistence.load_by_user_id(user_id).await {
+                        Ok(Some(existing_data)) => {
+                            // Convert current player state to PlayerData and save
+                            let player_data = player.to_player_data(existing_data.id, user_id);
+
+                            if let Err(e) = persistence.save(&player_data).await {
+                                error!(
+                                    session_id = session_id,
+                                    username = %username,
+                                    error = %e,
+                                    "Failed to save player data on disconnect"
+                                );
+                            } else {
+                                info!(
+                                    session_id = session_id,
+                                    username = %username,
+                                    player_id = %existing_data.id,
+                                    "Player data saved on disconnect"
+                                );
+                            }
+                        }
+                        Ok(None) => {
+                            debug!(
+                                session_id = session_id,
+                                username = %username,
+                                "No existing player record to save"
+                            );
+                        }
+                        Err(e) => {
+                            error!(
+                                session_id = session_id,
+                                username = %username,
+                                error = %e,
+                                "Failed to load player for save on disconnect"
+                            );
+                        }
+                    }
+                }
+
+                // Unregister player from game world
+                self.state.world.players.unregister(player.index);
+                self.state.world.decrement_player_count();
+
+                debug!(
+                    session_id = session_id,
+                    username = %username,
+                    player_index = player.index,
+                    "Player unregistered from game world"
+                );
+            }
+        }
+
+        // Release player index from auth service
+        if let Some(player_index) = player_index {
+            self.state.auth.release_player_index(player_index);
+            debug!(
+                session_id = session_id,
+                player_index = player_index,
+                "Released player index"
+            );
+        }
     }
 }

@@ -1,8 +1,0 @@
-void script_4174(int arg0) {
-	if (isBitFlagged(bitconfig_642, arg0)) {
-		setWidgetHidden(0);
-	} else {
-		setWidgetHidden(1);
-	}
-	return;
-}

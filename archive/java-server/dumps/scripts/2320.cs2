@@ -1,4 +1,0 @@
-void script_2320() {
-	setWidgetAnimation(1378, new WidgetPointer(305,2));
-	return;
-}

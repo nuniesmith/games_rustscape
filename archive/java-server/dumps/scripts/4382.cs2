@@ -1,4 +1,0 @@
-void script_4382() {
-	sendStringInput(strRemoveEntities(globalstring_345));
-	return;
-}
