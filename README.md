@@ -128,7 +128,7 @@ docker compose --profile java up -d
 | Game Server (TCP) | localhost:43597 | Base game port |
 | Game Server (World 1) | localhost:43598 | World 1 game port |
 | Management API | localhost:5556 | Server administration |
-| Database | localhost:3306 | MySQL database |
+| Database | localhost:3307 | MySQL database |
 
 #### Java Server Stack (Legacy)
 
@@ -301,7 +301,7 @@ docker compose --profile rust build --no-cache
 | 43599 | WebSocket server (host) → 43596 (container) |
 | 5556 | Management API (host) → 5555 (container) |
 | 8088 | Nginx web client |
-| 3306 | MySQL |
+| 3307 | MySQL (external port) |
 
 ### Java Server Stack
 
