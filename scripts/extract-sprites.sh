@@ -190,8 +190,11 @@ echo ""
 
 # Count files
 if [[ "$ATLAS" == true ]]; then
-    ATLAS_COUNT=$(find "$OUTPUT_DIR" -name "*.json" -path "*/sprites/*" | wc -l)
-    echo -e "Generated ${GREEN}$ATLAS_COUNT${NC} sprite sheet(s)"
+    # Count actual sprite sheet images (not JSON manifests)
+    SHEET_COUNT=$(find "$OUTPUT_DIR" -name "*.png" -o -name "*.qoi" | wc -l)
+    # Count total sprites from atlas JSON files
+    SPRITE_COUNT=$(find "$OUTPUT_DIR" -name "*.json" -path "*/sprites/*" -exec grep -o '"id":' {} \; 2>/dev/null | wc -l)
+    echo -e "Generated ${GREEN}$SHEET_COUNT${NC} sprite sheet(s) containing ${GREEN}$SPRITE_COUNT${NC} sprites"
 else
     FILE_COUNT=$(find "$OUTPUT_DIR" -name "*.$FORMAT" | wc -l)
     echo -e "Generated ${GREEN}$FILE_COUNT${NC} sprite files"

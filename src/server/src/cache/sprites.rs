@@ -1176,4 +1176,735 @@ mod tests {
         assert_eq!(manifest.sprites[0].id, 1);
         assert_eq!(manifest.sprites[0].path, "ui/1.png");
     }
+
+    // ========================================================================
+    // ImageFormat Tests
+    // ========================================================================
+
+    #[test]
+    fn test_image_format_extension() {
+        assert_eq!(ImageFormat::Png.extension(), "png");
+        assert_eq!(ImageFormat::Qoi.extension(), "qoi");
+    }
+
+    #[test]
+    fn test_image_format_from_str() {
+        assert_eq!(ImageFormat::from_str("png"), Some(ImageFormat::Png));
+        assert_eq!(ImageFormat::from_str("PNG"), Some(ImageFormat::Png));
+        assert_eq!(ImageFormat::from_str("qoi"), Some(ImageFormat::Qoi));
+        assert_eq!(ImageFormat::from_str("QOI"), Some(ImageFormat::Qoi));
+        assert_eq!(ImageFormat::from_str("jpg"), None);
+        assert_eq!(ImageFormat::from_str(""), None);
+    }
+
+    #[test]
+    fn test_image_format_default() {
+        let format: ImageFormat = Default::default();
+        assert_eq!(format, ImageFormat::Png);
+    }
+
+    // ========================================================================
+    // PNG Encoding Tests
+    // ========================================================================
+
+    #[test]
+    fn test_png_encoding_small_sprite() {
+        let sprite = Sprite {
+            id: 1,
+            frame: 0,
+            width: 2,
+            height: 2,
+            offset_x: 0,
+            offset_y: 0,
+            pixels: vec![
+                255, 0, 0, 255, // Red pixel
+                0, 255, 0, 255, // Green pixel
+                0, 0, 255, 255, // Blue pixel
+                255, 255, 255, 255, // White pixel
+            ],
+        };
+
+        let png_data = sprite.encode_png().unwrap();
+
+        // Check PNG signature
+        assert_eq!(
+            &png_data[0..8],
+            &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
+        );
+
+        // Should have reasonable size for a 2x2 image
+        assert!(png_data.len() > 50);
+        assert!(png_data.len() < 500);
+    }
+
+    #[test]
+    fn test_png_encoding_invalid_sprite() {
+        let sprite = Sprite::empty(1, 0);
+        let result = sprite.encode_png();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_png_ihdr_chunk() {
+        let sprite = Sprite {
+            id: 1,
+            frame: 0,
+            width: 100,
+            height: 50,
+            offset_x: 0,
+            offset_y: 0,
+            pixels: vec![0; 100 * 50 * 4],
+        };
+
+        let ihdr = sprite.create_ihdr_chunk();
+
+        // IHDR chunk: 4 (len) + 4 (type) + 13 (data) + 4 (crc) = 25 bytes
+        assert_eq!(ihdr.len(), 25);
+
+        // Check length field (13 bytes)
+        assert_eq!(&ihdr[0..4], &[0, 0, 0, 13]);
+
+        // Check type
+        assert_eq!(&ihdr[4..8], b"IHDR");
+
+        // Check width (100 = 0x64)
+        assert_eq!(&ihdr[8..12], &[0, 0, 0, 100]);
+
+        // Check height (50 = 0x32)
+        assert_eq!(&ihdr[12..16], &[0, 0, 0, 50]);
+
+        // Check bit depth (8)
+        assert_eq!(ihdr[16], 8);
+
+        // Check color type (6 = RGBA)
+        assert_eq!(ihdr[17], 6);
+    }
+
+    // ========================================================================
+    // QOI Encoding Tests
+    // ========================================================================
+
+    #[test]
+    fn test_qoi_encoding_small_sprite() {
+        let sprite = Sprite {
+            id: 1,
+            frame: 0,
+            width: 2,
+            height: 2,
+            offset_x: 0,
+            offset_y: 0,
+            pixels: vec![
+                255, 0, 0, 255, // Red pixel
+                0, 255, 0, 255, // Green pixel
+                0, 0, 255, 255, // Blue pixel
+                255, 255, 255, 255, // White pixel
+            ],
+        };
+
+        let qoi_data = sprite.encode_qoi().unwrap();
+
+        // Check QOI magic bytes "qoif"
+        assert_eq!(&qoi_data[0..4], b"qoif");
+
+        // Should have reasonable size
+        assert!(qoi_data.len() > 14); // At least header size
+        assert!(qoi_data.len() < 500);
+    }
+
+    #[test]
+    fn test_qoi_encoding_invalid_sprite() {
+        let sprite = Sprite::empty(1, 0);
+        let result = sprite.encode_qoi();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_qoi_vs_png_size() {
+        // Create a sprite with some pattern
+        let size = 32;
+        let mut pixels = Vec::with_capacity(size * size * 4);
+        for y in 0..size {
+            for x in 0..size {
+                pixels.push((x * 8) as u8); // R
+                pixels.push((y * 8) as u8); // G
+                pixels.push(((x + y) * 4) as u8); // B
+                pixels.push(255); // A
+            }
+        }
+
+        let sprite = Sprite {
+            id: 1,
+            frame: 0,
+            width: size as u32,
+            height: size as u32,
+            offset_x: 0,
+            offset_y: 0,
+            pixels,
+        };
+
+        let png_data = sprite.encode_png().unwrap();
+        let qoi_data = sprite.encode_qoi().unwrap();
+
+        // Both should produce valid output
+        assert!(!png_data.is_empty());
+        assert!(!qoi_data.is_empty());
+
+        // QOI is typically similar or slightly larger than PNG for small images
+        // but much faster to encode (we can't test speed in unit tests easily)
+    }
+
+    // ========================================================================
+    // Sprite Export Tests
+    // ========================================================================
+
+    #[test]
+    fn test_sprite_export_format() {
+        let sprite = Sprite {
+            id: 1,
+            frame: 0,
+            width: 4,
+            height: 4,
+            offset_x: 0,
+            offset_y: 0,
+            pixels: vec![128; 4 * 4 * 4],
+        };
+
+        let temp_dir = std::env::temp_dir().join("rustscape_test_export");
+        let _ = std::fs::create_dir_all(&temp_dir);
+
+        // Test PNG export
+        let png_path = temp_dir.join("test.png");
+        sprite.export(&png_path, ImageFormat::Png).unwrap();
+        assert!(png_path.exists());
+        let png_content = std::fs::read(&png_path).unwrap();
+        assert_eq!(
+            &png_content[0..8],
+            &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
+        );
+
+        // Test QOI export
+        let qoi_path = temp_dir.join("test.qoi");
+        sprite.export(&qoi_path, ImageFormat::Qoi).unwrap();
+        assert!(qoi_path.exists());
+        let qoi_content = std::fs::read(&qoi_path).unwrap();
+        assert_eq!(&qoi_content[0..4], b"qoif");
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    // ========================================================================
+    // SpriteExporter Tests
+    // ========================================================================
+
+    #[test]
+    fn test_sprite_exporter_new() {
+        let exporter = SpriteExporter::new("/tmp/test");
+        assert_eq!(exporter.format(), ImageFormat::Png);
+        assert_eq!(exporter.exported_count(), 0);
+        assert_eq!(exporter.failed_count(), 0);
+    }
+
+    #[test]
+    fn test_sprite_exporter_with_format() {
+        let exporter = SpriteExporter::with_format("/tmp/test", ImageFormat::Qoi);
+        assert_eq!(exporter.format(), ImageFormat::Qoi);
+    }
+
+    #[test]
+    fn test_sprite_exporter_new_qoi() {
+        let exporter = SpriteExporter::new_qoi("/tmp/test");
+        assert_eq!(exporter.format(), ImageFormat::Qoi);
+    }
+
+    #[test]
+    fn test_sprite_exporter_counts() {
+        let temp_dir = std::env::temp_dir().join("rustscape_test_exporter");
+        let _ = std::fs::create_dir_all(&temp_dir);
+
+        let exporter = SpriteExporter::new(&temp_dir);
+
+        // Export valid sprite
+        let valid_sprite = Sprite {
+            id: 1,
+            frame: 0,
+            width: 2,
+            height: 2,
+            offset_x: 0,
+            offset_y: 0,
+            pixels: vec![0; 16],
+        };
+        exporter.export_sprite(&valid_sprite, "test").unwrap();
+        assert_eq!(exporter.exported_count(), 1);
+
+        // Export invalid sprite (should increment failed count)
+        let invalid_sprite = Sprite::empty(2, 0);
+        let _ = exporter.export_sprite(&invalid_sprite, "test");
+        assert_eq!(exporter.failed_count(), 1);
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_sprite_exporter_filename_generation() {
+        let temp_dir = std::env::temp_dir().join("rustscape_test_filename");
+        let _ = std::fs::create_dir_all(&temp_dir);
+
+        let exporter = SpriteExporter::new(&temp_dir);
+
+        // Sprite without frame
+        let sprite1 = Sprite {
+            id: 100,
+            frame: 0,
+            width: 1,
+            height: 1,
+            offset_x: 0,
+            offset_y: 0,
+            pixels: vec![0; 4],
+        };
+        exporter.export_sprite(&sprite1, "sprites").unwrap();
+        assert!(temp_dir.join("sprites/100.png").exists());
+
+        // Sprite with frame
+        let sprite2 = Sprite {
+            id: 200,
+            frame: 5,
+            width: 1,
+            height: 1,
+            offset_x: 0,
+            offset_y: 0,
+            pixels: vec![0; 4],
+        };
+        exporter.export_sprite(&sprite2, "sprites").unwrap();
+        assert!(temp_dir.join("sprites/200_5.png").exists());
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    // ========================================================================
+    // SpriteSheetConfig Tests
+    // ========================================================================
+
+    #[test]
+    fn test_sprite_sheet_config_default() {
+        let config = SpriteSheetConfig::default();
+        assert_eq!(config.max_width, 2048);
+        assert_eq!(config.max_height, 2048);
+        assert_eq!(config.padding, 1);
+        assert_eq!(config.format, ImageFormat::Png);
+    }
+
+    #[test]
+    fn test_sprite_sheet_config_custom() {
+        let config = SpriteSheetConfig {
+            max_width: 4096,
+            max_height: 4096,
+            padding: 2,
+            format: ImageFormat::Qoi,
+        };
+        assert_eq!(config.max_width, 4096);
+        assert_eq!(config.padding, 2);
+        assert_eq!(config.format, ImageFormat::Qoi);
+    }
+
+    // ========================================================================
+    // SpriteSheetGenerator Tests
+    // ========================================================================
+
+    #[test]
+    fn test_sprite_sheet_generator_empty() {
+        let generator = SpriteSheetGenerator::new();
+        let sheets = generator.generate(&[], "test");
+        assert!(sheets.is_empty());
+    }
+
+    #[test]
+    fn test_sprite_sheet_generator_single_sprite() {
+        let generator = SpriteSheetGenerator::new();
+
+        let sprites = vec![Sprite {
+            id: 1,
+            frame: 0,
+            width: 32,
+            height: 32,
+            offset_x: 0,
+            offset_y: 0,
+            pixels: vec![255; 32 * 32 * 4],
+        }];
+
+        let sheets = generator.generate(&sprites, "test");
+
+        assert_eq!(sheets.len(), 1);
+        let (data, atlas) = &sheets[0];
+
+        // Check atlas metadata
+        assert_eq!(atlas.name, "test_0");
+        assert_eq!(atlas.sprites.len(), 1);
+        assert_eq!(atlas.sprites[0].id, 1);
+        assert_eq!(atlas.sprites[0].width, 32);
+        assert_eq!(atlas.sprites[0].height, 32);
+
+        // Check that image data was generated (PNG by default)
+        assert!(!data.is_empty());
+        assert_eq!(
+            &data[0..8],
+            &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
+        );
+    }
+
+    #[test]
+    fn test_sprite_sheet_generator_multiple_sprites() {
+        let generator = SpriteSheetGenerator::new();
+
+        let sprites: Vec<Sprite> = (0..10)
+            .map(|i| Sprite {
+                id: i,
+                frame: 0,
+                width: 16,
+                height: 16,
+                offset_x: 0,
+                offset_y: 0,
+                pixels: vec![i as u8; 16 * 16 * 4],
+            })
+            .collect();
+
+        let sheets = generator.generate(&sprites, "multi");
+
+        assert_eq!(sheets.len(), 1);
+        let (_, atlas) = &sheets[0];
+
+        assert_eq!(atlas.sprites.len(), 10);
+
+        // Check that sprites are positioned correctly (no overlaps)
+        for i in 0..atlas.sprites.len() {
+            for j in (i + 1)..atlas.sprites.len() {
+                let a = &atlas.sprites[i];
+                let b = &atlas.sprites[j];
+
+                // Check no overlap (simple bounding box check)
+                let no_overlap = a.x + a.width <= b.x
+                    || b.x + b.width <= a.x
+                    || a.y + a.height <= b.y
+                    || b.y + b.height <= a.y;
+
+                assert!(no_overlap, "Sprites {} and {} overlap", i, j);
+            }
+        }
+    }
+
+    #[test]
+    fn test_sprite_sheet_generator_with_qoi() {
+        let config = SpriteSheetConfig {
+            max_width: 256,
+            max_height: 256,
+            padding: 1,
+            format: ImageFormat::Qoi,
+        };
+        let generator = SpriteSheetGenerator::with_config(config);
+
+        let sprites = vec![Sprite {
+            id: 1,
+            frame: 0,
+            width: 8,
+            height: 8,
+            offset_x: 0,
+            offset_y: 0,
+            pixels: vec![128; 8 * 8 * 4],
+        }];
+
+        let sheets = generator.generate(&sprites, "qoi_test");
+
+        assert_eq!(sheets.len(), 1);
+        let (data, atlas) = &sheets[0];
+
+        // Check QOI format
+        assert_eq!(&data[0..4], b"qoif");
+        assert!(atlas.image.ends_with(".qoi"));
+    }
+
+    #[test]
+    fn test_sprite_sheet_generator_skips_invalid() {
+        let generator = SpriteSheetGenerator::new();
+
+        let sprites = vec![
+            Sprite::empty(1, 0), // Invalid
+            Sprite {
+                id: 2,
+                frame: 0,
+                width: 16,
+                height: 16,
+                offset_x: 0,
+                offset_y: 0,
+                pixels: vec![0; 16 * 16 * 4],
+            }, // Valid
+            Sprite::empty(3, 0), // Invalid
+        ];
+
+        let sheets = generator.generate(&sprites, "test");
+
+        assert_eq!(sheets.len(), 1);
+        let (_, atlas) = &sheets[0];
+
+        // Only the valid sprite should be in the sheet
+        assert_eq!(atlas.sprites.len(), 1);
+        assert_eq!(atlas.sprites[0].id, 2);
+    }
+
+    #[test]
+    fn test_sprite_sheet_generator_respects_max_size() {
+        let config = SpriteSheetConfig {
+            max_width: 64,
+            max_height: 64,
+            padding: 1,
+            format: ImageFormat::Png,
+        };
+        let generator = SpriteSheetGenerator::with_config(config);
+
+        // Create sprites that won't all fit in one 64x64 sheet
+        let sprites: Vec<Sprite> = (0..20)
+            .map(|i| Sprite {
+                id: i,
+                frame: 0,
+                width: 20,
+                height: 20,
+                offset_x: 0,
+                offset_y: 0,
+                pixels: vec![0; 20 * 20 * 4],
+            })
+            .collect();
+
+        let sheets = generator.generate(&sprites, "small");
+
+        // Should need multiple sheets
+        assert!(sheets.len() > 1);
+
+        // Each sheet should respect max dimensions
+        for (_, atlas) in &sheets {
+            assert!(atlas.width <= 64);
+            assert!(atlas.height <= 64);
+        }
+    }
+
+    #[test]
+    fn test_sprite_sheet_atlas_metadata() {
+        let generator = SpriteSheetGenerator::new();
+
+        let sprites = vec![Sprite {
+            id: 42,
+            frame: 3,
+            width: 24,
+            height: 16,
+            offset_x: 5,
+            offset_y: -3,
+            pixels: vec![0; 24 * 16 * 4],
+        }];
+
+        let sheets = generator.generate(&sprites, "meta_test");
+        let (_, atlas) = &sheets[0];
+
+        let entry = &atlas.sprites[0];
+        assert_eq!(entry.id, 42);
+        assert_eq!(entry.frame, 3);
+        assert_eq!(entry.width, 24);
+        assert_eq!(entry.height, 16);
+        assert_eq!(entry.offset_x, 5);
+        assert_eq!(entry.offset_y, -3);
+
+        // Position should include padding
+        assert_eq!(entry.x, 1); // 1 pixel padding
+        assert_eq!(entry.y, 1);
+    }
+
+    // ========================================================================
+    // next_power_of_two Tests
+    // ========================================================================
+
+    #[test]
+    fn test_next_power_of_two() {
+        assert_eq!(next_power_of_two(0), 1);
+        assert_eq!(next_power_of_two(1), 1);
+        assert_eq!(next_power_of_two(2), 2);
+        assert_eq!(next_power_of_two(3), 4);
+        assert_eq!(next_power_of_two(4), 4);
+        assert_eq!(next_power_of_two(5), 8);
+        assert_eq!(next_power_of_two(7), 8);
+        assert_eq!(next_power_of_two(8), 8);
+        assert_eq!(next_power_of_two(9), 16);
+        assert_eq!(next_power_of_two(100), 128);
+        assert_eq!(next_power_of_two(1000), 1024);
+        assert_eq!(next_power_of_two(2048), 2048);
+        assert_eq!(next_power_of_two(2049), 4096);
+    }
+
+    // ========================================================================
+    // SpriteManifest with Format Tests
+    // ========================================================================
+
+    #[test]
+    fn test_sprite_manifest_with_format() {
+        let mut manifest = SpriteManifest::new("sprites");
+
+        let sprite = Sprite {
+            id: 1,
+            frame: 2,
+            width: 32,
+            height: 32,
+            offset_x: 0,
+            offset_y: 0,
+            pixels: vec![0; 32 * 32 * 4],
+        };
+
+        // Test PNG path
+        manifest.add_sprite_with_format(&sprite, "ui", ImageFormat::Png);
+        assert_eq!(manifest.sprites[0].path, "ui/1_2.png");
+
+        // Test QOI path
+        manifest.add_sprite_with_format(&sprite, "icons", ImageFormat::Qoi);
+        assert_eq!(manifest.sprites[1].path, "icons/1_2.qoi");
+    }
+
+    #[test]
+    fn test_sprite_manifest_skips_invalid() {
+        let mut manifest = SpriteManifest::new("sprites");
+        let invalid_sprite = Sprite::empty(1, 0);
+
+        manifest.add_sprite(&invalid_sprite, "ui");
+        assert_eq!(manifest.count, 0);
+        assert!(manifest.sprites.is_empty());
+    }
+
+    // ========================================================================
+    // SpriteDecoder Tests
+    // ========================================================================
+
+    #[test]
+    fn test_sprite_decoder_short_data() {
+        // Data too short to be a valid sprite
+        let result = SpriteDecoder::decode(1, &[0]);
+        assert!(result.is_ok());
+        let sprites = result.unwrap();
+        // Should return empty sprite for invalid data
+        assert!(!sprites.is_empty());
+    }
+
+    #[test]
+    fn test_sprite_decoder_zero_frame_count() {
+        // Data with frame count of 0
+        let data = vec![0, 0]; // 2 bytes = frame count of 0
+        let result = SpriteDecoder::decode(1, &data);
+        assert!(result.is_ok());
+    }
+
+    // ========================================================================
+    // ArchiveExtractionJob Tests
+    // ========================================================================
+
+    #[test]
+    fn test_archive_extraction_job() {
+        let job = ArchiveExtractionJob {
+            archive_id: 123,
+            data: vec![1, 2, 3, 4],
+        };
+
+        assert_eq!(job.archive_id, 123);
+        assert_eq!(job.data.len(), 4);
+    }
+
+    // ========================================================================
+    // Integration-style Tests
+    // ========================================================================
+
+    #[test]
+    fn test_full_sprite_workflow() {
+        let temp_dir = std::env::temp_dir().join("rustscape_test_workflow");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        let _ = std::fs::create_dir_all(&temp_dir);
+
+        // Create sprites
+        let sprites: Vec<Sprite> = (0..5)
+            .map(|i| Sprite {
+                id: i * 10,
+                frame: i,
+                width: 8 + i * 2,
+                height: 8 + i * 2,
+                offset_x: i as i32,
+                offset_y: -(i as i32),
+                pixels: vec![(i * 50) as u8; ((8 + i * 2) * (8 + i * 2) * 4) as usize],
+            })
+            .collect();
+
+        // Export as individual files
+        let exporter = SpriteExporter::with_format(&temp_dir, ImageFormat::Png);
+        for sprite in &sprites {
+            exporter.export_sprite(sprite, "individual").unwrap();
+        }
+        assert_eq!(exporter.exported_count(), 5);
+
+        // Generate sprite sheet
+        let generator = SpriteSheetGenerator::new();
+        let sheets = generator.generate(&sprites, "atlas");
+        assert_eq!(sheets.len(), 1);
+
+        let (sheet_data, atlas) = &sheets[0];
+        assert_eq!(atlas.sprites.len(), 5);
+
+        // Save sprite sheet
+        let sheet_path = temp_dir.join("atlas_0.png");
+        std::fs::write(&sheet_path, sheet_data).unwrap();
+        assert!(sheet_path.exists());
+
+        // Create manifest
+        let mut manifest = SpriteManifest::new("test");
+        for sprite in &sprites {
+            manifest.add_sprite(sprite, "individual");
+        }
+        assert_eq!(manifest.count, 5);
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_thread_safety_of_exporter() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let temp_dir = std::env::temp_dir().join("rustscape_test_threads");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        let _ = std::fs::create_dir_all(&temp_dir);
+
+        let exporter = Arc::new(SpriteExporter::new(&temp_dir));
+
+        let handles: Vec<_> = (0..4)
+            .map(|t| {
+                let exporter = Arc::clone(&exporter);
+                thread::spawn(move || {
+                    for i in 0..10 {
+                        let sprite = Sprite {
+                            id: t * 100 + i,
+                            frame: 0,
+                            width: 4,
+                            height: 4,
+                            offset_x: 0,
+                            offset_y: 0,
+                            pixels: vec![0; 64],
+                        };
+                        let _ = exporter.export_sprite(&sprite, &format!("thread_{}", t));
+                    }
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        // Should have exported 40 sprites total (4 threads * 10 sprites)
+        assert_eq!(exporter.exported_count(), 40);
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
 }

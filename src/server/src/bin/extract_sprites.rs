@@ -21,7 +21,8 @@ use tracing_subscriber::FmtSubscriber;
 // Import from the main crate
 use rustscape_server::cache::sprites::{
     ArchiveExtractionJob, ImageFormat, SpriteDecoder, SpriteExporter, SpriteManifest,
-    SpriteSheetConfig, SpriteSheetGenerator, EXTRA_SPRITE_INDEX, SPRITE_INDEX, TEXTURE_INDEX,
+    SpriteSheetAtlas, SpriteSheetConfig, SpriteSheetGenerator, EXTRA_SPRITE_INDEX, SPRITE_INDEX,
+    TEXTURE_INDEX,
 };
 use rustscape_server::cache::CacheStore;
 
@@ -346,6 +347,9 @@ fn run_extraction(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     // Create manifests for each index
     let mut manifests: Vec<(String, SpriteManifest)> = Vec::new();
 
+    // Track sprite sheets generated (for atlas mode)
+    let mut all_atlases: Vec<SpriteSheetAtlas> = Vec::new();
+
     for &index in &indices {
         let index_name = match index {
             SPRITE_INDEX => "sprites",
@@ -412,9 +416,9 @@ fn run_extraction(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
                     let atlas_dir = args.output_path.join(index_name);
                     let _ = std::fs::create_dir_all(&atlas_dir);
 
-                    for (sheet_data, atlas) in &sheets {
+                    for (sheet_data, atlas) in sheets {
                         let sheet_path = atlas_dir.join(&atlas.image);
-                        if let Err(e) = std::fs::write(&sheet_path, sheet_data) {
+                        if let Err(e) = std::fs::write(&sheet_path, &sheet_data) {
                             warn!("Failed to write sprite sheet: {}", e);
                         }
 
@@ -423,6 +427,9 @@ fn run_extraction(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
                         if let Ok(json) = serde_json::to_string_pretty(&atlas) {
                             let _ = std::fs::write(&atlas_json_path, json);
                         }
+
+                        // Track for summary
+                        all_atlases.push(atlas);
                     }
                 } else {
                     // Export all sprites in parallel as individual files
@@ -558,8 +565,30 @@ fn run_extraction(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     info!("");
     info!("Extraction Complete!");
     info!("====================");
-    info!("Exported: {} sprites", exporter.exported_count());
-    info!("Failed: {} sprites", exporter.failed_count());
+
+    if args.atlas {
+        // Atlas mode summary
+        let total_sprites_in_sheets: usize = all_atlases.iter().map(|a| a.sprites.len()).sum();
+        info!(
+            "Generated: {} sprite sheet(s) containing {} sprites",
+            all_atlases.len(),
+            total_sprites_in_sheets
+        );
+        for atlas in &all_atlases {
+            info!(
+                "  - {}: {}x{} ({} sprites)",
+                atlas.image,
+                atlas.width,
+                atlas.height,
+                atlas.sprites.len()
+            );
+        }
+    } else {
+        // Individual file mode summary
+        info!("Exported: {} sprites", exporter.exported_count());
+        info!("Failed: {} sprites", exporter.failed_count());
+    }
+
     info!("Time: {:.2}s", elapsed.as_secs_f64());
     info!("Output: {:?}", exporter.output_dir());
 
