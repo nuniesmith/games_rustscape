@@ -253,10 +253,10 @@ cache/cache-*.zip
 !cache/assemble.sh
 !cache/.gitkeep
 
-# Extracted sprites (generated from cache)
-src/clients/web/public/sprites/**/*.png
-src/clients/web/public/sprites/**/manifest.json
-!src/clients/web/public/sprites/.gitkeep
+# Extracted sprites - allow pre-extracted sprite sheets to be committed
+# Individual sprite files (if generated) are ignored, but sprite sheets are tracked
+# src/clients/web/public/sprites/**/*.png  # Commented out to allow sprite sheets
+# src/clients/web/public/sprites/**/manifest.json  # Commented out to allow manifests
 
 # ============================================================================
 # KEEP EMPTY DIRECTORIES
