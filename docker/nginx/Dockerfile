@@ -66,10 +66,11 @@ FROM rust:latest AS sprite-extractor-builder
 
 WORKDIR /build
 
-# Install build dependencies
+# Install build dependencies (cmake required for libz-ng-sys SIMD zlib)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     libssl-dev \
+    cmake \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

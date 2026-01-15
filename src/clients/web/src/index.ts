@@ -950,6 +950,10 @@ function handleGamePacket(buffer: ByteBuffer): void {
             if (packetData.length >= 2) {
                 const energy = packetData[1];
                 gameState.setRunEnergy(energy);
+                // Update renderer with run energy
+                if (gameRenderer) {
+                    gameRenderer.updateRunEnergy(energy);
+                }
                 console.log(`Run energy: ${energy}`);
             }
             break;

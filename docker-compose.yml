@@ -88,7 +88,9 @@ services:
             - "${NGINX_HTTPS_PORT:-8443}:443"
         volumes:
             - "rustscape_cache:/usr/share/nginx/html/assets/cache:ro"
-            - "rustscape_sprites:/usr/share/nginx/html/sprites:ro"
+            # Note: sprites are baked into the nginx image during Docker build
+            # Uncomment the line below if you want dynamic sprite updates from server:
+            # - "rustscape_sprites:/usr/share/nginx/html/sprites:ro"
             - "./config/ssl:/etc/nginx/ssl:ro"
         environment:
             GAME_SERVER_HOST: server

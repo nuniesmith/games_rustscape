@@ -183,6 +183,7 @@ export async function instantiate(imports={}, runInitializer=true) {
         'org.w3c.dom.addListener_$external_fun' : (_this, p0) => _this.addListener(p0),
         'org.w3c.dom.protocol_$external_prop_getter' : (_this) => _this.protocol,
         'org.w3c.dom.hostname_$external_prop_getter' : (_this) => _this.hostname,
+        'org.w3c.dom.port_$external_prop_getter' : (_this) => _this.port,
         'org.w3c.dom.search_$external_prop_getter' : (_this) => _this.search,
         'org.w3c.dom.WebSocket_$external_fun' : (p0, p1, isDefault0) => new WebSocket(p0, isDefault0 ? undefined : p1, ),
         'org.w3c.dom.onopen_$external_prop_setter' : (_this, v) => _this.onopen = v,
@@ -305,6 +306,8 @@ export async function instantiate(imports={}, runInitializer=true) {
         'androidx.compose.ui.platform.keyCode_$external_prop_setter' : (_this, v) => _this.keyCode = v,
         'androidx.compose.ui.window.force_$external_prop_getter' : (_this) => _this.force,
         'androidx.compose.foundation.text.EventListener' : (handler) => (event) => { handler(event) },
+        'com.rustscape.client.jsUpdateProgress' : (progress, status) => { if (window.rustscape) window.rustscape.updateProgress(progress, status); },
+        'com.rustscape.client.jsHideLoading' : () => { if (window.rustscape) window.rustscape.hideLoading(); },
         'com.rustscape.client.log_$external_fun' : (_this, p0) => _this.log(p0),
         'com.rustscape.client.console_$external_object_getInstance' : () => console
     }

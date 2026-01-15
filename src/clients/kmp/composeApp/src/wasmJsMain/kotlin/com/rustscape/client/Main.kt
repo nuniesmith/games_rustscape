@@ -1,5 +1,6 @@
 package com.rustscape.client
 
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.window.CanvasBasedWindow
 import com.rustscape.client.game.GameState
@@ -22,14 +23,32 @@ import org.w3c.dom.WebSocket
 import org.w3c.dom.events.Event
 
 /**
+ * External JS functions for loading screen control
+ * These call into window.rustscape object defined in index.html
+ */
+@JsFun("(progress, status) => { if (window.rustscape) window.rustscape.updateProgress(progress, status); }")
+private external fun jsUpdateProgress(progress: Int, status: String)
+
+@JsFun("() => { if (window.rustscape) window.rustscape.hideLoading(); }")
+private external fun jsHideLoading()
+
+@JsFun("(message) => { if (window.rustscape) window.rustscape.showError(message); }")
+private external fun jsShowError(message: String)
+
+/**
  * WASM/JS web application entry point
  * Launches the Rustscape client in a browser canvas
  */
 @OptIn(ExperimentalComposeUiApi::class)
 fun main() {
+    // Update loading progress - initializing WASM
+    jsUpdateProgress(20, "Loading WebAssembly...")
+
     // Read configuration from URL parameters or defaults
     val urlParams = window.location.search
     val config = parseConfig(urlParams)
+
+    jsUpdateProgress(40, "Initializing client...")
 
     // Application state
     val appState = AppState().apply {
@@ -39,11 +58,23 @@ fun main() {
     // Create the web game client
     val gameClient = WebGameClient(config, appState.gameState)
 
+    jsUpdateProgress(60, "Setting up UI...")
+
     // Launch the Compose canvas application
     CanvasBasedWindow(
         canvasElementId = "gameCanvas",
         title = "Rustscape"
     ) {
+        // Hide loading screen once Compose is ready
+        LaunchedEffect(Unit) {
+            jsUpdateProgress(80, "Starting game...")
+            // Small delay to ensure canvas is rendered
+            delay(100)
+            jsUpdateProgress(100, "Ready!")
+            delay(200)
+            jsHideLoading()
+        }
+
         App(
             appState = appState,
             onLogin = { username, password, rememberMe ->
@@ -80,13 +111,17 @@ private fun parseConfig(urlParams: String): ClientConfig {
             parts[0] to (parts.getOrNull(1) ?: "")
         }
 
+    // For web clients, use the browser's port (same origin) unless explicitly specified
+    // This ensures WebSocket connects through nginx on the same port as the page
+    val browserPort = window.location.port.toIntOrNull() ?: if (window.location.protocol == "https:") 443 else 80
+
     return ClientConfig(
         serverHost = params["host"] ?: window.location.hostname.ifEmpty { "localhost" },
-        serverPort = params["port"]?.toIntOrNull() ?: 43594,
+        serverPort = params["port"]?.toIntOrNull() ?: browserPort,
         wsPath = params["wsPath"] ?: "/ws",
-        revision = params["revision"]?.toIntOrNull() ?: 317,
+        revision = params["revision"]?.toIntOrNull() ?: 530,
         useWebSocket = true,
-        debug = params["debug"] == "true"
+        debug = params["debug"] != "false"  // Enable debug by default for WASM
     )
 }
 
@@ -99,6 +134,15 @@ class WebGameClient(
 ) : GameClient(config, gameState) {
 
     private var webSocket: WebSocket? = null
+
+    /**
+     * Override log to use browser console instead of println
+     */
+    override fun log(message: String) {
+        if (config.debug) {
+            console.log("[GameClient] $message")
+        }
+    }
 
     override suspend fun connect(): Boolean {
         return suspendCancellableCoroutine { continuation ->
@@ -114,9 +158,10 @@ class WebGameClient(
                 ws.binaryType = "arraybuffer".toJsString().unsafeCast<org.w3c.dom.BinaryType>()
 
                 ws.onopen = { _: Event ->
-                    log("WebSocket connected")
+                    console.log("[WebGameClient] WebSocket connected, raw socket open")
                     webSocket = ws
-                    setState(ConnectionState.CONNECTED)
+                    // Don't set CONNECTED here - we're not fully connected until login succeeds
+                    // Keep state at CONNECTING until performLogin sets it to HANDSHAKING
                     if (continuation.isActive) {
                         continuation.resume(true) {}
                     }
@@ -193,12 +238,31 @@ class WebGameClient(
     }
 
     override fun onDataReceived(data: ByteArray) {
+        val currentState = _connectionState.value
+        console.log("[WebGameClient] onDataReceived: ${data.size} bytes in state: $currentState")
         scope.launch {
-            when (_connectionState.value) {
-                ConnectionState.HANDSHAKING -> onHandshakeResponse(data)
-                ConnectionState.LOGGING_IN -> onLoginResponse(data)
-                ConnectionState.CONNECTED -> processGamePacket(data)
-                else -> log("Received data in unexpected state: ${_connectionState.value}")
+            when (currentState) {
+                ConnectionState.HANDSHAKING -> {
+                    console.log("[WebGameClient] Routing to onHandshakeResponse")
+                    onHandshakeResponse(data)
+                }
+                ConnectionState.LOGGING_IN -> {
+                    console.log("[WebGameClient] Routing to onLoginResponse")
+                    onLoginResponse(data)
+                }
+                ConnectionState.CONNECTED -> {
+                    console.log("[WebGameClient] Routing to processGamePacket")
+                    processGamePacket(data)
+                }
+                ConnectionState.CONNECTING -> {
+                    // Server responded while we're still connecting - treat as handshake response
+                    // This can happen if the response arrives before performLogin() sets HANDSHAKING
+                    console.log("[WebGameClient] Received data while CONNECTING - buffering or treating as handshake")
+                    onHandshakeResponse(data)
+                }
+                else -> {
+                    console.log("[WebGameClient] ERROR: Received data in unexpected state: $currentState")
+                }
             }
         }
     }

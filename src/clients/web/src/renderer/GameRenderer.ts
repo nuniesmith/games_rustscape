@@ -90,6 +90,19 @@ const COLORS = {
 };
 
 /**
+ * Animation state for entities
+ */
+interface AnimationState {
+    walking: boolean;
+    direction: number; // 0=N, 1=NE, 2=E, 3=SE, 4=S, 5=SW, 6=W, 7=NW
+    walkCycle: number; // 0-1 animation progress
+    bobOffset: number; // Vertical bob for walking
+    targetX: number;
+    targetY: number;
+    lastMoveTime: number;
+}
+
+/**
  * Game state interface
  */
 export interface GameState {
@@ -102,6 +115,8 @@ export interface GameState {
     playerOptions: string[];
     mapRegion: { x: number; y: number } | null;
     position: { x: number; y: number; z: number };
+    isMoving: boolean;
+    runEnergy: number;
 }
 
 /**
@@ -145,6 +160,22 @@ export class GameRenderer {
     private sprites: Map<string, Texture> = new Map();
     private loadedAssets = false;
 
+    // Animation state
+    private animationState: AnimationState = {
+        walking: false,
+        direction: 4, // South by default
+        walkCycle: 0,
+        bobOffset: 0,
+        targetX: 0,
+        targetY: 0,
+        lastMoveTime: 0,
+    };
+
+    // Visual effects
+    private walkingIndicator: Graphics | null = null;
+    private destinationMarker: Graphics | null = null;
+    private runEnergyBar: Graphics | null = null;
+
     // Current game state
     private gameState: GameState = {
         playerName: "",
@@ -158,6 +189,8 @@ export class GameRenderer {
         playerOptions: [],
         mapRegion: null,
         position: { x: 3222, y: 3222, z: 0 },
+        isMoving: false,
+        runEnergy: 100,
     };
 
     constructor(canvas: HTMLCanvasElement) {
@@ -198,6 +231,9 @@ export class GameRenderer {
 
         this.app.stage.addChild(this.worldContainer);
         this.app.stage.addChild(this.entityContainer);
+
+        // Set up animation ticker
+        this.app.ticker.add(this.animationTick.bind(this));
         this.app.stage.addChild(this.uiContainer);
         this.app.stage.addChild(this.chatContainer);
 
@@ -331,7 +367,8 @@ export class GameRenderer {
     private async loadSpritesFromServer(): Promise<boolean> {
         try {
             // Check if sprite manifest exists
-            const manifestUrl = "/sprites/sprites/manifest.json";
+            // The extractor outputs: /sprites/sprites_manifest.json (for sprites index)
+            const manifestUrl = "/sprites/sprites_manifest.json";
             const response = await fetch(manifestUrl);
 
             if (!response.ok) {
@@ -658,17 +695,47 @@ export class GameRenderer {
         shadow.fill({ color: 0x000000, alpha: 0.3 });
         this.playerSprite.addChild(shadow);
 
-        // Player body
+        // Player body (outer ring)
+        const bodyOuter = new Graphics();
+        bodyOuter.circle(0, 0, 16);
+        bodyOuter.fill({ color: 0x000000, alpha: 0.3 });
+        this.playerSprite.addChild(bodyOuter);
+
+        // Player body (main)
         const body = new Graphics();
         body.circle(0, 0, 15);
         body.fill(COLORS.primary);
+        body.label = "playerBody";
         this.playerSprite.addChild(body);
 
-        // Player highlight
+        // Player highlight (gives 3D effect)
         const highlight = new Graphics();
         highlight.circle(-4, -4, 5);
         highlight.fill(COLORS.primaryLight);
+        highlight.label = "playerHighlight";
         this.playerSprite.addChild(highlight);
+
+        // Direction indicator (small arrow showing facing direction)
+        const dirIndicator = new Graphics();
+        dirIndicator.moveTo(0, -20);
+        dirIndicator.lineTo(-5, -12);
+        dirIndicator.lineTo(5, -12);
+        dirIndicator.closePath();
+        dirIndicator.fill({ color: COLORS.textCyan, alpha: 0.7 });
+        dirIndicator.label = "directionIndicator";
+        this.playerSprite.addChild(dirIndicator);
+
+        // Walking indicator (pulsing circle under player when moving)
+        this.walkingIndicator = new Graphics();
+        this.walkingIndicator.label = "walkingIndicator";
+        this.walkingIndicator.visible = false;
+        this.entityContainer.addChild(this.walkingIndicator);
+
+        // Destination marker (shows where player is walking to)
+        this.destinationMarker = new Graphics();
+        this.destinationMarker.label = "destinationMarker";
+        this.destinationMarker.visible = false;
+        this.entityContainer.addChild(this.destinationMarker);
 
         this.playerSprite.x = playerX;
         this.playerSprite.y = playerY;
@@ -741,7 +808,7 @@ export class GameRenderer {
         regionText.anchor.set(0.5, 0);
         regionText.x = MINIMAP_SIZE / 2;
         regionText.y = MINIMAP_SIZE - 15;
-        regionText.name = "regionText";
+        regionText.label = "regionText";
         minimapContainer.addChild(regionText);
 
         this.uiContainer.addChild(minimapContainer);
@@ -824,7 +891,7 @@ export class GameRenderer {
             });
             nameText.x = 10;
             nameText.y = y;
-            nameText.name = `skill_name_${i}`;
+            nameText.label = `skill_name_${i}`;
             this.skillsPanel.addChild(nameText);
 
             // Skill level
@@ -835,7 +902,7 @@ export class GameRenderer {
             levelText.anchor.set(1, 0);
             levelText.x = 150;
             levelText.y = y;
-            levelText.name = `skill_level_${i}`;
+            levelText.label = `skill_level_${i}`;
             this.skillsPanel.addChild(levelText);
         }
 
@@ -850,7 +917,7 @@ export class GameRenderer {
 
         // Remove old combat text
         const oldCombat = this.skillsPanel.children.find(
-            (c) => c.name === "combat_level",
+            (c) => c.label === "combat_level",
         );
         if (oldCombat) this.skillsPanel.removeChild(oldCombat);
 
@@ -861,7 +928,7 @@ export class GameRenderer {
         combatText.anchor.set(0.5, 0);
         combatText.x = 80;
         combatText.y = 200;
-        combatText.name = "combat_level";
+        combatText.label = "combat_level";
         this.skillsPanel.addChild(combatText);
     }
 
@@ -943,7 +1010,7 @@ export class GameRenderer {
             });
             placeholder.x = 10;
             placeholder.y = 20;
-            placeholder.name = "msg_placeholder";
+            placeholder.label = "msg_placeholder";
             chatPanel.addChild(placeholder);
         } else {
             visibleMessages.forEach((msg, i) => {
@@ -953,7 +1020,7 @@ export class GameRenderer {
                 });
                 msgText.x = 10;
                 msgText.y = 20 + i * 16;
-                msgText.name = `msg_${i}`;
+                msgText.label = `msg_${i}`;
                 chatPanel.addChild(msgText);
             });
         }
@@ -971,7 +1038,7 @@ export class GameRenderer {
 
         // Find and update region text
         const regionText = minimapContainer.children.find(
-            (c) => c.name === "regionText",
+            (c) => c.label === "regionText",
         ) as Text;
         if (regionText && this.gameState.mapRegion) {
             regionText.text = `Region: ${this.gameState.mapRegion.x}, ${this.gameState.mapRegion.y}`;
@@ -993,7 +1060,7 @@ export class GameRenderer {
 
         // Update or create crown icon
         const existingCrown = this.entityContainer.children.find(
-            (c) => c.name === "crown",
+            (c) => c.label === "crown",
         ) as Text;
         if (existingCrown) {
             this.entityContainer.removeChild(existingCrown);
@@ -1016,7 +1083,7 @@ export class GameRenderer {
             crown.anchor.set(0.5, 1);
             crown.x = this.playerNameText.x - 40;
             crown.y = this.playerNameText.y;
-            crown.name = "crown";
+            crown.label = "crown";
             this.entityContainer.addChild(crown);
         }
     }
@@ -1087,6 +1154,275 @@ export class GameRenderer {
     }
 
     /**
+     * Animation tick - called every frame
+     */
+    private animationTick(ticker: { deltaTime: number }): void {
+        const delta = ticker.deltaTime / 60; // Normalize to seconds
+
+        // Update walk cycle animation
+        if (this.animationState.walking || this.gameState.isMoving) {
+            this.animationState.walkCycle += delta * 8; // Walk speed
+            if (this.animationState.walkCycle > 1) {
+                this.animationState.walkCycle -= 1;
+            }
+
+            // Bob up and down while walking
+            this.animationState.bobOffset =
+                Math.sin(this.animationState.walkCycle * Math.PI * 2) * 3;
+
+            // Apply bob to player sprite
+            if (this.playerSprite) {
+                this.playerSprite.y =
+                    (GAME_HEIGHT - 100) / 2 + this.animationState.bobOffset;
+            }
+
+            // Update walking indicator
+            this.updateWalkingIndicator();
+        } else {
+            // Smoothly return to normal position
+            this.animationState.bobOffset *= 0.9;
+            if (
+                this.playerSprite &&
+                Math.abs(this.animationState.bobOffset) > 0.1
+            ) {
+                this.playerSprite.y =
+                    (GAME_HEIGHT - 100) / 2 + this.animationState.bobOffset;
+            }
+        }
+
+        // Update direction indicator rotation
+        this.updateDirectionIndicator();
+
+        // Pulse effect on destination marker
+        if (this.destinationMarker && this.destinationMarker.visible) {
+            const pulse = 0.8 + Math.sin(Date.now() / 200) * 0.2;
+            this.destinationMarker.scale.set(pulse);
+        }
+    }
+
+    /**
+     * Update the walking indicator effect
+     */
+    private updateWalkingIndicator(): void {
+        if (!this.walkingIndicator || !this.playerSprite) return;
+
+        this.walkingIndicator.clear();
+        this.walkingIndicator.visible = this.gameState.isMoving;
+
+        if (this.gameState.isMoving) {
+            const pulse = 0.5 + Math.sin(Date.now() / 150) * 0.3;
+            const radius = 25 + pulse * 10;
+
+            // Expanding rings effect
+            this.walkingIndicator.circle(0, 0, radius);
+            this.walkingIndicator.stroke({
+                width: 2,
+                color: COLORS.textCyan,
+                alpha: 0.3 * (1 - pulse),
+            });
+
+            this.walkingIndicator.circle(0, 0, radius * 0.7);
+            this.walkingIndicator.stroke({
+                width: 1,
+                color: COLORS.textCyan,
+                alpha: 0.5 * (1 - pulse),
+            });
+
+            this.walkingIndicator.x = this.playerSprite.x;
+            this.walkingIndicator.y = this.playerSprite.y + 15;
+        }
+    }
+
+    /**
+     * Update the direction indicator arrow
+     */
+    private updateDirectionIndicator(): void {
+        if (!this.playerSprite) return;
+
+        const dirIndicator = this.playerSprite.children.find(
+            (c) => c.label === "directionIndicator",
+        );
+        if (dirIndicator) {
+            // Direction angles: 0=N, 1=NE, 2=E, 3=SE, 4=S, 5=SW, 6=W, 7=NW
+            const angles = [0, 45, 90, 135, 180, 225, 270, 315];
+            const targetAngle =
+                (angles[this.animationState.direction] || 180) *
+                (Math.PI / 180);
+            dirIndicator.rotation = targetAngle;
+        }
+    }
+
+    /**
+     * Set player movement state
+     */
+    setMoving(isMoving: boolean, targetX?: number, targetY?: number): void {
+        this.gameState.isMoving = isMoving;
+        this.animationState.walking = isMoving;
+
+        if (isMoving && targetX !== undefined && targetY !== undefined) {
+            this.animationState.targetX = targetX;
+            this.animationState.targetY = targetY;
+            this.animationState.lastMoveTime = Date.now();
+
+            // Show destination marker
+            this.showDestinationMarker(targetX, targetY);
+
+            // Calculate direction based on target
+            this.updateFacingDirection(targetX, targetY);
+        } else {
+            // Hide destination marker when stopped
+            if (this.destinationMarker) {
+                this.destinationMarker.visible = false;
+            }
+        }
+    }
+
+    /**
+     * Show destination marker at target position
+     */
+    private showDestinationMarker(worldX: number, worldY: number): void {
+        if (!this.destinationMarker) return;
+
+        this.destinationMarker.clear();
+
+        // Draw an X marker
+        this.destinationMarker.moveTo(-8, -8);
+        this.destinationMarker.lineTo(8, 8);
+        this.destinationMarker.moveTo(8, -8);
+        this.destinationMarker.lineTo(-8, 8);
+        this.destinationMarker.stroke({
+            width: 3,
+            color: COLORS.textYellow,
+            alpha: 0.8,
+        });
+
+        // Draw circle around X
+        this.destinationMarker.circle(0, 0, 12);
+        this.destinationMarker.stroke({
+            width: 2,
+            color: COLORS.textYellow,
+            alpha: 0.6,
+        });
+
+        // Position relative to player (simplified - center of screen offset)
+        const playerX = this.gameState.position.x;
+        const playerY = this.gameState.position.y;
+        const offsetX = (worldX - playerX) * TILE_SIZE;
+        const offsetY = (playerY - worldY) * TILE_SIZE; // Y is inverted
+
+        this.destinationMarker.x = GAME_WIDTH / 2 + offsetX;
+        this.destinationMarker.y = (GAME_HEIGHT - 100) / 2 + offsetY;
+        this.destinationMarker.visible = true;
+    }
+
+    /**
+     * Update facing direction based on movement target
+     */
+    private updateFacingDirection(targetX: number, targetY: number): void {
+        const playerX = this.gameState.position.x;
+        const playerY = this.gameState.position.y;
+        const dx = targetX - playerX;
+        const dy = targetY - playerY;
+
+        // Calculate angle and convert to 8-direction
+        const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+
+        // Convert angle to direction (0=N, 1=NE, 2=E, etc.)
+        // Adjust because our coordinate system has Y inverted
+        let direction: number;
+        if (angle >= -22.5 && angle < 22.5)
+            direction = 2; // E
+        else if (angle >= 22.5 && angle < 67.5)
+            direction = 1; // NE
+        else if (angle >= 67.5 && angle < 112.5)
+            direction = 0; // N
+        else if (angle >= 112.5 && angle < 157.5)
+            direction = 7; // NW
+        else if (angle >= 157.5 || angle < -157.5)
+            direction = 6; // W
+        else if (angle >= -157.5 && angle < -112.5)
+            direction = 5; // SW
+        else if (angle >= -112.5 && angle < -67.5)
+            direction = 4; // S
+        else direction = 3; // SE
+
+        this.animationState.direction = direction;
+    }
+
+    /**
+     * Set player facing direction directly
+     */
+    setDirection(direction: number): void {
+        this.animationState.direction = direction % 8;
+    }
+
+    /**
+     * Update run energy display
+     */
+    updateRunEnergy(energy: number): void {
+        this.gameState.runEnergy = Math.max(0, Math.min(100, energy));
+        this.renderRunEnergyBar();
+    }
+
+    /**
+     * Render run energy bar near minimap
+     */
+    private renderRunEnergyBar(): void {
+        if (!this.uiContainer) return;
+
+        if (!this.runEnergyBar) {
+            this.runEnergyBar = new Graphics();
+            this.runEnergyBar.label = "runEnergyBar";
+            this.uiContainer.addChild(this.runEnergyBar);
+        }
+
+        this.runEnergyBar.clear();
+
+        const barWidth = 100;
+        const barHeight = 8;
+        const x = GAME_WIDTH - MINIMAP_SIZE - 20;
+        const y = MINIMAP_SIZE + 30;
+
+        // Background
+        this.runEnergyBar.rect(x, y, barWidth, barHeight);
+        this.runEnergyBar.fill({ color: 0x333333, alpha: 0.8 });
+
+        // Energy fill
+        const fillWidth = (this.gameState.runEnergy / 100) * barWidth;
+        const energyColor =
+            this.gameState.runEnergy > 30
+                ? 0x00ff00
+                : this.gameState.runEnergy > 10
+                  ? 0xffff00
+                  : 0xff0000;
+        this.runEnergyBar.rect(x, y, fillWidth, barHeight);
+        this.runEnergyBar.fill({ color: energyColor, alpha: 0.9 });
+
+        // Border
+        this.runEnergyBar.rect(x, y, barWidth, barHeight);
+        this.runEnergyBar.stroke({ width: 1, color: 0x666666 });
+
+        // Label
+        const label = this.uiContainer.children.find(
+            (c) => c.label === "runEnergyLabel",
+        ) as Text;
+        if (!label) {
+            const labelText = new Text({
+                text: "Run",
+                style: new TextStyle({
+                    fontFamily: "Arial",
+                    fontSize: 10,
+                    fill: COLORS.text,
+                }),
+            });
+            labelText.x = x;
+            labelText.y = y - 12;
+            labelText.label = "runEnergyLabel";
+            this.uiContainer.addChild(labelText);
+        }
+    }
+
+    /**
      * Start the render loop
      */
     start(): void {
@@ -1097,6 +1433,7 @@ export class GameRenderer {
         this.updateChatDisplay();
         this.updateSkillsDisplay();
         this.updatePlayerDisplay();
+        this.renderRunEnergyBar();
 
         console.log("Renderer started");
     }

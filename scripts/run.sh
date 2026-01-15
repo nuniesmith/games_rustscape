@@ -18,6 +18,8 @@
 #   web       - Build and serve the web client only
 #   sprites   - Extract sprites from game cache
 #   cache     - Cache management commands
+#   test      - Run tests (server, sprites, all)
+#   ci        - Run full CI pipeline (test, build, docker)
 
 set -e
 
@@ -1098,6 +1100,182 @@ sprites_command() {
     esac
 }
 
+# Run Rust server tests
+run_server_tests() {
+    local filter="${1:-}"
+
+    log_step "Running server tests..."
+    cd "$PROJECT_DIR/src/server"
+
+    if [ -n "$filter" ]; then
+        log_info "Running tests matching: $filter"
+        cargo test "$filter" -- --nocapture
+    else
+        cargo test
+    fi
+
+    local result=$?
+    cd "$PROJECT_DIR"
+
+    if [ $result -eq 0 ]; then
+        log_success "All tests passed!"
+    else
+        log_error "Some tests failed"
+    fi
+
+    return $result
+}
+
+# Run sprite extraction tests
+run_sprite_tests() {
+    log_step "Running sprite tests..."
+    cd "$PROJECT_DIR/src/server"
+
+    cargo test sprite -- --nocapture
+
+    local result=$?
+    cd "$PROJECT_DIR"
+
+    return $result
+}
+
+# Test command handler
+test_command() {
+    local subcmd="${1:-all}"
+    shift 2>/dev/null || true
+
+    case "$subcmd" in
+        server)
+            run_server_tests "$@"
+            ;;
+        sprites)
+            run_sprite_tests
+            ;;
+        all)
+            log_info "Running all tests..."
+            run_server_tests
+            ;;
+        filter|f)
+            if [ -z "$1" ]; then
+                log_error "Please specify a test filter"
+                log_info "Usage: $0 test filter <pattern>"
+                return 1
+            fi
+            run_server_tests "$1"
+            ;;
+        help|--help|-h)
+            echo "Test commands:"
+            echo ""
+            echo "  test              - Run all tests (default)"
+            echo "  test server       - Run server tests only"
+            echo "  test sprites      - Run sprite-related tests"
+            echo "  test filter <pat> - Run tests matching pattern"
+            echo ""
+            echo "Examples:"
+            echo "  $0 test                    # Run all tests"
+            echo "  $0 test server             # Run server tests"
+            echo "  $0 test filter auth        # Run auth-related tests"
+            echo "  $0 test filter jwt         # Run JWT tests"
+            echo ""
+            ;;
+        *)
+            # Assume it's a filter pattern
+            run_server_tests "$subcmd"
+            ;;
+    esac
+}
+
+# CI pipeline command
+ci_command() {
+    local subcmd="${1:-full}"
+    shift 2>/dev/null || true
+
+    case "$subcmd" in
+        full)
+            log_info "Running full CI pipeline..."
+            echo ""
+
+            # Step 1: Run tests
+            log_step "Step 1/4: Running tests..."
+            if ! run_server_tests; then
+                log_error "CI failed: Tests did not pass"
+                return 1
+            fi
+            echo ""
+
+            # Step 2: Build sprite extractor
+            log_step "Step 2/4: Building sprite extractor..."
+            cd "$PROJECT_DIR/src/server"
+            if ! cargo build --release --bin extract-sprites; then
+                log_error "CI failed: Sprite extractor build failed"
+                cd "$PROJECT_DIR"
+                return 1
+            fi
+            cd "$PROJECT_DIR"
+            echo ""
+
+            # Step 3: Build KMP web client (if Java available)
+            log_step "Step 3/4: Building KMP web client..."
+            if check_java 2>/dev/null; then
+                build_kmp_web || log_warn "KMP build failed, continuing..."
+            else
+                log_warn "Java not available, skipping KMP build"
+            fi
+            echo ""
+
+            # Step 4: Build Docker images
+            log_step "Step 4/4: Building Docker images..."
+            ensure_env
+            if ! docker compose build server nginx; then
+                log_error "CI failed: Docker build failed"
+                return 1
+            fi
+
+            echo ""
+            log_success "CI pipeline completed successfully!"
+            ;;
+        test)
+            log_info "CI: Running tests only..."
+            run_server_tests
+            ;;
+        build)
+            log_info "CI: Building artifacts..."
+            cd "$PROJECT_DIR/src/server"
+            cargo build --release
+            cd "$PROJECT_DIR"
+            if check_java 2>/dev/null; then
+                build_kmp_web || true
+            fi
+            ;;
+        docker)
+            log_info "CI: Building Docker images..."
+            ensure_env
+            docker compose build server nginx
+            ;;
+        help|--help|-h)
+            echo "CI pipeline commands:"
+            echo ""
+            echo "  ci              - Run full CI pipeline (default)"
+            echo "  ci full         - Run full CI pipeline (test, build, docker)"
+            echo "  ci test         - Run tests only"
+            echo "  ci build        - Build artifacts only"
+            echo "  ci docker       - Build Docker images only"
+            echo ""
+            echo "The full pipeline runs:"
+            echo "  1. Rust tests (cargo test)"
+            echo "  2. Sprite extractor build"
+            echo "  3. KMP web client build (if Java available)"
+            echo "  4. Docker image builds"
+            echo ""
+            ;;
+        *)
+            log_error "Unknown CI command: $subcmd"
+            ci_command help
+            return 1
+            ;;
+    esac
+}
+
 # Cache command handler
 cache_command() {
     local subcmd="${1:-help}"
@@ -1200,6 +1378,18 @@ show_help() {
     echo "  ssl check               - Check certificate status"
     echo "  ssl info                - Show certificate details"
     echo ""
+    echo "Test Commands:"
+    echo "  test                    - Run all tests"
+    echo "  test server             - Run server tests only"
+    echo "  test sprites            - Run sprite-related tests"
+    echo "  test filter <pattern>   - Run tests matching pattern"
+    echo ""
+    echo "CI Commands:"
+    echo "  ci                      - Run full CI pipeline"
+    echo "  ci test                 - Run tests only"
+    echo "  ci build                - Build artifacts only"
+    echo "  ci docker               - Build Docker images only"
+    echo ""
     echo "Client Commands:"
     echo "  client web              - Build KMP web client (WASM)"
     echo "  client desktop [target] - Build KMP desktop client"
@@ -1230,6 +1420,10 @@ show_help() {
     echo "  $0 client desktop linux  # Build Linux desktop client"
     echo "  $0 logs server           # View server logs only"
     echo "  $0 init --force          # Regenerate .env with new secrets"
+    echo "  $0 test                  # Run all tests"
+    echo "  $0 test filter auth      # Run auth-related tests"
+    echo "  $0 ci                    # Run full CI pipeline"
+    echo "  $0 ci docker             # Build Docker images only"
     echo ""
 }
 
@@ -1281,6 +1475,12 @@ case "$COMMAND" in
         ;;
     cache)
         cache_command "$@"
+        ;;
+    test)
+        test_command "$@"
+        ;;
+    ci)
+        ci_command "$@"
         ;;
     web)
         build_kmp_web

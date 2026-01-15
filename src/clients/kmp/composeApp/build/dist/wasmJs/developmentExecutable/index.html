@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="description" content="Rustscape - A RuneScape-inspired MMORPG">
+    <meta name="theme-color" content="#2B2117">
+    <title>Rustscape</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #1A140E;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+        }
+
+        #gameContainer {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+        }
+
+        #gameCanvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            touch-action: none;
+        }
+
+        /* Loading screen */
+        #loadingScreen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: linear-gradient(180deg, #1A140E 0%, #2B2117 50%, #1A140E 100%);
+            z-index: 1000;
+            transition: opacity 0.5s ease-out;
+        }
+
+        #loadingScreen.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .loading-title {
+            font-size: 48px;
+            font-weight: bold;
+            color: #D4A84B;
+            letter-spacing: 4px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+            margin-bottom: 8px;
+        }
+
+        .loading-subtitle {
+            font-size: 14px;
+            color: #CCCCCC;
+            letter-spacing: 2px;
+            margin-bottom: 40px;
+        }
+
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid #3D3024;
+            border-top-color: #D4A84B;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            font-size: 14px;
+            color: #CCCCCC;
+        }
+
+        .loading-progress {
+            width: 300px;
+            height: 8px;
+            background-color: #3D3024;
+            border-radius: 4px;
+            margin-top: 20px;
+            overflow: hidden;
+        }
+
+        .loading-progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #D4A84B, #E5C77A);
+            border-radius: 4px;
+            width: 0%;
+            transition: width 0.3s ease-out;
+        }
+
+        /* Error message */
+        #errorMessage {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(68, 34, 34, 0.95);
+            border: 2px solid #FF4444;
+            border-radius: 8px;
+            padding: 24px 32px;
+            text-align: center;
+            z-index: 2000;
+        }
+
+        #errorMessage h2 {
+            color: #FF4444;
+            margin-bottom: 12px;
+            font-size: 18px;
+        }
+
+        #errorMessage p {
+            color: #CCCCCC;
+            font-size: 14px;
+            margin-bottom: 16px;
+        }
+
+        #errorMessage button {
+            background-color: #D4A84B;
+            color: #1A140E;
+            border: none;
+            padding: 10px 24px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        #errorMessage button:hover {
+            background-color: #E5C77A;
+        }
+
+        /* Unsupported browser warning */
+        #unsupportedWarning {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #1A140E;
+            z-index: 3000;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            padding: 20px;
+            text-align: center;
+        }
+
+        #unsupportedWarning h1 {
+            color: #D4A84B;
+            margin-bottom: 20px;
+        }
+
+        #unsupportedWarning p {
+            color: #CCCCCC;
+            max-width: 500px;
+            line-height: 1.6;
+        }
+
+        /* Fullscreen button */
+        #fullscreenBtn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background-color: rgba(43, 33, 23, 0.8);
+            border: 1px solid #5C4A36;
+            color: #CCCCCC;
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            z-index: 100;
+            transition: all 0.2s;
+        }
+
+        #fullscreenBtn:hover {
+            background-color: rgba(61, 48, 36, 0.9);
+            color: #D4A84B;
+        }
+    </style>
+</head>
+<body>
+    <!-- Unsupported browser warning -->
+    <div id="unsupportedWarning">
+        <h1>Browser Not Supported</h1>
+        <p>
+            Rustscape requires a modern browser with WebAssembly support.
+            Please use the latest version of Chrome, Firefox, Safari, or Edge.
+        </p>
+    </div>
+
+    <!-- Loading screen -->
+    <div id="loadingScreen">
+        <div class="loading-title">RUSTSCAPE</div>
+        <div class="loading-subtitle">A RuneScape-Inspired Adventure</div>
+        <div class="loading-spinner"></div>
+        <div class="loading-text" id="loadingStatus">Loading game...</div>
+        <div class="loading-progress">
+            <div class="loading-progress-bar" id="loadingProgressBar"></div>
+        </div>
+    </div>
+
+    <!-- Error message -->
+    <div id="errorMessage">
+        <h2>Connection Error</h2>
+        <p id="errorText">Failed to connect to the game server.</p>
+        <button onclick="location.reload()">Retry</button>
+    </div>
+
+    <!-- Game container -->
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+        <button id="fullscreenBtn" onclick="toggleFullscreen()">⛶ Fullscreen</button>
+    </div>
+
+    <script>
+        // Check for WebAssembly support
+        if (typeof WebAssembly !== 'object') {
+            document.getElementById('unsupportedWarning').style.display = 'flex';
+            document.getElementById('loadingScreen').style.display = 'none';
+        }
+
+        // Loading progress simulation
+        let progress = 0;
+        const progressBar = document.getElementById('loadingProgressBar');
+        const loadingStatus = document.getElementById('loadingStatus');
+
+        function updateLoadingProgress(value, status) {
+            progress = Math.min(100, value);
+            progressBar.style.width = progress + '%';
+            if (status) {
+                loadingStatus.textContent = status;
+            }
+        }
+
+        // Simulate loading stages
+        updateLoadingProgress(10, 'Initializing...');
+
+        // Fullscreen toggle
+        function toggleFullscreen() {
+            const container = document.getElementById('gameContainer');
+            if (!document.fullscreenElement) {
+                container.requestFullscreen().catch(err => {
+                    console.log('Fullscreen error:', err);
+                });
+            } else {
+                document.exitFullscreen();
+            }
+        }
+
+        // Show error message
+        function showError(message) {
+            document.getElementById('errorText').textContent = message;
+            document.getElementById('errorMessage').style.display = 'block';
+        }
+
+        // Hide loading screen when game is ready
+        function hideLoadingScreen() {
+            updateLoadingProgress(100, 'Starting game...');
+            setTimeout(() => {
+                document.getElementById('loadingScreen').classList.add('hidden');
+            }, 500);
+        }
+
+        // Keyboard event handling to prevent browser shortcuts
+        document.addEventListener('keydown', function(e) {
+            // Prevent F5 refresh, Ctrl+R, etc. during gameplay
+            if (e.key === 'F5' || (e.ctrlKey && e.key === 'r')) {
+                // Allow if user really wants to refresh
+            }
+            // Prevent backspace from navigating back
+            if (e.key === 'Backspace' && e.target === document.body) {
+                e.preventDefault();
+            }
+        });
+
+        // Prevent right-click context menu on canvas
+        document.getElementById('gameCanvas').addEventListener('contextmenu', function(e) {
+            e.preventDefault();
+        });
+
+        // Handle window resize
+        window.addEventListener('resize', function() {
+            // Compose handles canvas resize automatically
+        });
+
+        // Expose functions for WASM to call
+        window.rustscape = {
+            updateProgress: updateLoadingProgress,
+            hideLoading: hideLoadingScreen,
+            showError: showError
+        };
+    </script>
+
+    <!-- Load the WASM module -->
+    <script src="rustscape-client.js"></script>
+</body>
+</html>

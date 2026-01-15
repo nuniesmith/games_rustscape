@@ -295,17 +295,23 @@ abstract class GameClient(
 
     /**
      * Perform the login handshake and authentication
+     *
+     * Rustscape server protocol (revision 530):
+     * 1. Client sends: opcode (1 byte) + revision (4 bytes big-endian)
+     * 2. Server responds: status (1 byte) + server_key (8 bytes) if status == 0
      */
     protected open suspend fun performLogin(): Boolean {
         try {
             setState(ConnectionState.HANDSHAKING)
 
-            // Step 1: Send connection type and username hash
-            val usernameHash = (username.lowercase().hashCode() shr 16) and 31
-            val handshake = ByteBuffer.allocate(2)
+            // Step 1: Send login opcode and revision
+            // Server expects: opcode 14 + 4-byte revision (big-endian)
+            val handshake = ByteBuffer.allocate(5)
             handshake.writeUByte(14) // Login connection type
-            handshake.writeUByte(usernameHash)
+            handshake.writeInt(config.revision) // Revision as 4-byte big-endian int
             sendRaw(handshake.toByteArray())
+
+            log("Sent login handshake with revision ${config.revision}")
 
             // Wait for server response with server key
             // This will be handled by onHandshakeResponse()
@@ -322,8 +328,12 @@ abstract class GameClient(
      * Handle handshake response from server
      */
     protected suspend fun onHandshakeResponse(data: ByteArray) {
+        log("onHandshakeResponse called with ${data.size} bytes: ${data.take(20).joinToString { it.toString() }}")
+
         val buffer = ByteBuffer.wrap(data)
         val responseCode = buffer.readUByte()
+
+        log("Handshake response code: $responseCode (expected 0 for ExchangeKeys)")
 
         if (responseCode != 0) {
             log("Handshake failed with code: $responseCode")
@@ -332,9 +342,16 @@ abstract class GameClient(
             return
         }
 
+        if (buffer.remaining < 8) {
+            log("ERROR: Not enough data for server key, remaining=${buffer.remaining}")
+            _events.send(ClientEvent.LoginFailed(-1, "Invalid handshake response: missing server key"))
+            setState(ConnectionState.ERROR)
+            return
+        }
+
         // Read server key (8 bytes)
         serverKey = buffer.readLong()
-        log("Received server key: $serverKey")
+        log("Received server key: $serverKey, now sending login block")
 
         // Now send login credentials
         setState(ConnectionState.LOGGING_IN)
@@ -343,6 +360,15 @@ abstract class GameClient(
 
     /**
      * Send the login block with credentials
+     *
+     * Server expects after login type (16):
+     * - 2 bytes: packet_size (big-endian u16)
+     * - packet_size bytes containing:
+     *   - 4 bytes: revision (int, big-endian)
+     *   - 1 byte: low_memory flag
+     *   - 2 bytes: rsa_size (ushort, big-endian)
+     *   - rsa_size bytes: RSA block
+     *   - remaining: username string (null-terminated)
      */
     protected suspend fun sendLoginBlock() {
         // Generate client seeds for ISAAC
@@ -355,34 +381,37 @@ abstract class GameClient(
         isaacPair = IsaacPair.forClient(intArrayOf(clientSeed1, clientSeed2, serverSeedHigh, serverSeedLow))
 
         // Build RSA block (normally encrypted, simplified here)
-        val rsaBlock = ByteBuffer.allocate(128)
+        // Contains: magic(1) + seeds(16) + uid(4) + password(string)
+        val rsaBlock = ByteBuffer.allocate(256)
         rsaBlock.writeUByte(10) // RSA magic number
         rsaBlock.writeInt(clientSeed1)
         rsaBlock.writeInt(clientSeed2)
         rsaBlock.writeInt(serverSeedHigh)
         rsaBlock.writeInt(serverSeedLow)
         rsaBlock.writeInt(0) // User ID (0 for new)
-        rsaBlock.writeString(username)
-        rsaBlock.writeString(password)
+        rsaBlock.writeString(password) // Password in RSA block
 
         val rsaData = rsaBlock.toByteArray()
 
+        // Calculate packet size (everything after the 2-byte size field)
+        // revision(4) + low_memory(1) + rsa_size(2) + rsaData.size + username_string
+        val usernameBytes = username.encodeToByteArray()
+        val packetSize = 4 + 1 + 2 + rsaData.size + usernameBytes.size + 1 // +1 for null terminator
+
         // Build login packet
-        val loginPacket = ByteBuffer.allocate(rsaData.size + 40)
+        val loginPacket = ByteBuffer.allocate(1 + 2 + packetSize)
         loginPacket.writeUByte(16) // New connection login opcode
-        loginPacket.writeUByte(rsaData.size + 36 + 1 + 1) // Login block size
+        loginPacket.writeUShort(packetSize) // 2-byte packet size
 
-        loginPacket.writeUByte(255) // Magic byte
-        loginPacket.writeUShort(config.revision) // Client revision
-
+        // Packet content:
+        loginPacket.writeInt(config.revision) // 4-byte revision
         loginPacket.writeUByte(0) // Low memory flag
-        for (i in 0 until 9) {
-            loginPacket.writeInt(0) // CRC values (simplified)
-        }
+        loginPacket.writeUShort(rsaData.size) // 2-byte RSA block size
+        loginPacket.writeBytes(rsaData) // RSA block
+        loginPacket.writeBytes(usernameBytes) // Username
+        loginPacket.writeUByte(0) // Null terminator for string
 
-        loginPacket.writeUByte(rsaData.size) // RSA block size
-        loginPacket.writeBytes(rsaData)
-
+        log("Sending login block: packetSize=$packetSize, rsaSize=${rsaData.size}, username=$username")
         sendRaw(loginPacket.toByteArray())
     }
 
@@ -390,27 +419,41 @@ abstract class GameClient(
      * Handle login response from server
      */
     protected suspend fun onLoginResponse(data: ByteArray) {
+        log("onLoginResponse called with ${data.size} bytes: ${data.take(20).joinToString { it.toString() }}")
+
         val buffer = ByteBuffer.wrap(data)
         val responseCode = buffer.readUByte()
 
+        log("Login response code: $responseCode (expected ${LoginResponse.SUCCESS} for Success)")
+
         if (responseCode == LoginResponse.SUCCESS) {
+            if (buffer.remaining < 5) {
+                log("ERROR: Not enough data for login success, remaining=${buffer.remaining}")
+                _events.send(ClientEvent.LoginFailed(-1, "Invalid login response: incomplete data"))
+                setState(ConnectionState.ERROR)
+                return
+            }
+
             val rights = PlayerRights.fromId(buffer.readUByte())
             val flagged = buffer.readUByte() == 1
             val playerIndex = buffer.readUShort()
             val member = buffer.readUByte() == 1
 
-            log("Login successful! Rights=$rights, Index=$playerIndex, Member=$member")
+            log("Login successful! Rights=$rights, Index=$playerIndex, Member=$member, Flagged=$flagged")
 
             gameState.setPlayerInfo(username, playerIndex, rights, member)
 
             setState(ConnectionState.CONNECTED)
             startPingInterval()
             reconnectAttempts = 0
+            initPacketsReceived = false // Reset - expect raw init packets next
 
+            log("Emitting LoginSuccess event")
             _events.send(ClientEvent.LoginSuccess(rights, playerIndex, member))
+            log("LoginSuccess event emitted")
         } else {
             val message = LoginResponse.getMessage(responseCode)
-            log("Login failed: $message")
+            log("Login failed with code $responseCode: $message")
             setState(ConnectionState.ERROR)
             _events.send(ClientEvent.LoginFailed(responseCode, message))
         }
@@ -418,39 +461,86 @@ abstract class GameClient(
 
     // ============ Packet Processing ============
 
+    // Track whether we've received the first batch of init packets (sent without ISAAC)
+    protected var initPacketsReceived = false
+
     /**
      * Process incoming game packet
      */
     protected suspend fun processGamePacket(data: ByteArray) {
         if (data.isEmpty()) return
 
-        val buffer = ByteBuffer.wrap(data)
-        val pair = isaacPair ?: return
+        try {
+            val buffer = ByteBuffer.wrap(data)
+            log("processGamePacket: ${data.size} bytes, initPacketsReceived=$initPacketsReceived, first bytes: ${data.take(10).joinToString { it.toUByte().toString() }}")
 
-        while (buffer.hasRemaining) {
-            val encodedOpcode = buffer.readUByte()
-            val opcode = pair.decodeOpcode(encodedOpcode)
+            while (buffer.hasRemaining) {
+                val rawOpcode = buffer.readUByte()
 
-            val packetSize = PacketSize.getServerPacketSize(opcode)
-            val payloadSize = when (packetSize) {
-                -1 -> buffer.readUByte()
-                -2 -> buffer.readUShort()
-                else -> packetSize
+                // Server sends init packets WITHOUT ISAAC encoding
+                // Only decode with ISAAC after init packets are done
+                // For now, try raw opcode first - if it's a known packet, use it
+                // Otherwise try ISAAC decoding
+                val opcode = if (!initPacketsReceived) {
+                    // First batch - try raw opcode (no ISAAC)
+                    rawOpcode
+                } else {
+                    // After init, use ISAAC decoding
+                    val pair = isaacPair
+                    if (pair != null) {
+                        pair.decodeOpcode(rawOpcode)
+                    } else {
+                        rawOpcode
+                    }
+                }
+
+                val packetSize = PacketSize.getServerPacketSize(opcode)
+                log("Packet: rawOpcode=$rawOpcode, opcode=$opcode, packetSize=$packetSize, remaining=${buffer.remaining}")
+
+                val payloadSize = when (packetSize) {
+                    -1 -> {
+                        if (!buffer.hasRemaining) {
+                            log("ERROR: Expected variable byte size but no data remaining")
+                            return
+                        }
+                        buffer.readUByte()
+                    }
+                    -2 -> {
+                        if (buffer.remaining < 2) {
+                            log("ERROR: Expected variable short size but only ${buffer.remaining} bytes remaining")
+                            return
+                        }
+                        buffer.readUShort()
+                    }
+                    else -> packetSize
+                }
+
+                log("Payload size: $payloadSize, remaining: ${buffer.remaining}")
+
+                val payload = if (payloadSize > 0 && buffer.remaining >= payloadSize) {
+                    ByteBuffer.wrap(buffer.readBytes(payloadSize))
+                } else if (payloadSize > 0) {
+                    log("WARN: Not enough data for payload, need $payloadSize but have ${buffer.remaining}")
+                    ByteBuffer.allocate(0)
+                } else {
+                    ByteBuffer.allocate(0)
+                }
+
+                log("Received packet: opcode=$opcode, size=$payloadSize")
+
+                // Handle known packets
+                try {
+                    handlePacket(opcode, payload)
+                } catch (e: Exception) {
+                    log("ERROR handling packet opcode=$opcode: ${e.message}")
+                }
+
+                // Emit event for custom handlers
+                _events.send(ClientEvent.PacketReceived(opcode, payload))
             }
-
-            val payload = if (payloadSize > 0 && buffer.remaining >= payloadSize) {
-                ByteBuffer.wrap(buffer.readBytes(payloadSize))
-            } else {
-                ByteBuffer.allocate(0)
-            }
-
-            log("Received packet: opcode=$opcode, size=$payloadSize")
-
-            // Handle known packets
-            handlePacket(opcode, payload)
-
-            // Emit event for custom handlers
-            _events.send(ClientEvent.PacketReceived(opcode, payload))
+        } catch (e: Exception) {
+            log("ERROR in processGamePacket: ${e.message}")
+            e.printStackTrace()
         }
     }
 
@@ -557,7 +647,7 @@ abstract class GameClient(
         }
     }
 
-    protected fun log(message: String) {
+    protected open fun log(message: String) {
         if (config.debug) {
             println("[GameClient] $message")
         }
