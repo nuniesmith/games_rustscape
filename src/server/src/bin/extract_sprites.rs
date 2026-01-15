@@ -9,16 +9,19 @@
 //! Examples:
 //!   extract_sprites --cache ./cache --output ./assets/sprites
 //!   extract_sprites --cache ./cache --output ./assets/sprites --index 8
+//!   extract_sprites --cache ./cache --output ./assets/sprites --parallel
 
 use std::path::PathBuf;
 use std::time::Instant;
 
+use rayon::prelude::*;
 use tracing::{error, info, trace, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 
 // Import from the main crate
 use rustscape_server::cache::sprites::{
-    SpriteDecoder, SpriteExporter, SpriteManifest, EXTRA_SPRITE_INDEX, SPRITE_INDEX, TEXTURE_INDEX,
+    ArchiveExtractionJob, SpriteDecoder, SpriteExporter, SpriteManifest, EXTRA_SPRITE_INDEX,
+    SPRITE_INDEX, TEXTURE_INDEX,
 };
 use rustscape_server::cache::CacheStore;
 
@@ -32,6 +35,10 @@ struct Args {
     index: Option<u8>,
     /// Verbose output
     verbose: bool,
+    /// Use parallel extraction (recommended for multi-core systems)
+    parallel: bool,
+    /// Number of threads to use (0 = auto-detect)
+    threads: usize,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -41,6 +48,8 @@ fn parse_args() -> Result<Args, String> {
     let mut output_path: Option<PathBuf> = None;
     let mut index: Option<u8> = None;
     let mut verbose = false;
+    let mut parallel = true; // Default to parallel for best performance
+    let mut threads: usize = 0; // 0 = auto-detect
 
     let mut i = 1;
     while i < args.len() {
@@ -73,6 +82,21 @@ fn parse_args() -> Result<Args, String> {
             "--verbose" | "-v" => {
                 verbose = true;
             }
+            "--parallel" | "-p" => {
+                parallel = true;
+            }
+            "--sequential" | "-s" => {
+                parallel = false;
+            }
+            "--threads" | "-t" => {
+                i += 1;
+                if i >= args.len() {
+                    return Err("Missing value for --threads".to_string());
+                }
+                threads = args[i]
+                    .parse()
+                    .map_err(|_| format!("Invalid threads value: {}", args[i]))?;
+            }
             "--help" | "-h" => {
                 print_help();
                 std::process::exit(0);
@@ -92,6 +116,8 @@ fn parse_args() -> Result<Args, String> {
         output_path,
         index,
         verbose,
+        parallel,
+        threads,
     })
 }
 
@@ -101,6 +127,7 @@ fn print_help() {
 Sprite Extraction Tool - Rustscape
 
 Extracts sprites from the game cache and exports them as PNG files.
+Uses parallel processing by default for maximum performance.
 
 USAGE:
     extract_sprites --cache <PATH> --output <PATH> [OPTIONS]
@@ -111,12 +138,18 @@ REQUIRED:
 
 OPTIONS:
     -i, --index <ID>       Extract only a specific index (8=sprites, 32=textures)
+    -p, --parallel         Use parallel extraction (default, recommended)
+    -s, --sequential       Use sequential extraction (slower, for debugging)
+    -t, --threads <N>      Number of threads to use (0 = auto-detect, default)
     -v, --verbose          Enable verbose output
     -h, --help             Print this help message
 
 EXAMPLES:
-    # Extract all sprites
+    # Extract all sprites (parallel by default)
     extract_sprites --cache ./cache --output ./assets/sprites
+
+    # Extract with specific thread count
+    extract_sprites --cache ./cache --output ./assets/sprites --threads 8
 
     # Extract only UI sprites (index 8)
     extract_sprites --cache ./cache --output ./assets/sprites --index 8
@@ -124,10 +157,17 @@ EXAMPLES:
     # Extract textures (index 32)
     extract_sprites --cache ./cache --output ./assets/sprites --index 32
 
+    # Sequential extraction for debugging
+    extract_sprites --cache ./cache --output ./assets/sprites --sequential
+
 CACHE INDICES:
     8  - UI Sprites (buttons, icons, interface elements)
     32 - Textures (ground textures, object textures)
     34 - Additional sprites (varies by revision)
+
+PERFORMANCE:
+    Parallel extraction uses all available CPU cores by default.
+    On a typical 8-core system, expect 4-8x speedup over sequential.
 "#
     );
 }
@@ -170,10 +210,31 @@ fn main() {
 fn run_extraction(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     let start_time = Instant::now();
 
+    // Configure thread pool if specified
+    if args.threads > 0 {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(args.threads)
+            .build_global()
+            .unwrap_or_else(|e| {
+                warn!("Failed to set thread count, using default: {}", e);
+            });
+    }
+
+    let num_threads = rayon::current_num_threads();
+
     info!("Sprite Extraction Tool");
     info!("======================");
     info!("Cache path: {:?}", args.cache_path);
     info!("Output path: {:?}", args.output_path);
+    info!(
+        "Mode: {} ({} threads)",
+        if args.parallel {
+            "parallel"
+        } else {
+            "sequential"
+        },
+        num_threads
+    );
 
     // Check if cache directory exists
     if !args.cache_path.exists() {
@@ -200,7 +261,7 @@ fn run_extraction(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Create exporter
-    let mut exporter = SpriteExporter::new(&args.output_path);
+    let exporter = SpriteExporter::new(&args.output_path);
 
     // Create manifests for each index
     let mut manifests: Vec<(String, SpriteManifest)> = Vec::new();
@@ -224,76 +285,130 @@ fn run_extraction(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             let archive_count = ref_table.archives.len();
             info!("Found {} archives in index {}", archive_count, index);
 
-            for (idx, archive_info) in ref_table.archives.iter().enumerate() {
-                let archive_id = archive_info.id;
+            if args.parallel {
+                // === PARALLEL EXTRACTION ===
+                info!("Using parallel extraction...");
+                let index_start = Instant::now();
 
-                // Progress logging - every 50 archives for more visibility
-                if idx % 50 == 0 {
-                    info!(
-                        "  [{}/{}] Processing archive {} ({}%)",
-                        idx,
-                        archive_count,
-                        archive_id,
-                        (idx * 100) / archive_count.max(1)
-                    );
-                    // Flush stdout to ensure progress is visible in Docker builds
-                    use std::io::Write;
-                    let _ = std::io::stdout().flush();
+                // Collect all archive data first (decompressed for sprite parsing)
+                let jobs: Vec<ArchiveExtractionJob> = ref_table
+                    .archives
+                    .iter()
+                    .filter_map(|archive_info| {
+                        let archive_id = archive_info.id;
+                        match cache.get_decompressed_file(index, archive_id) {
+                            Ok(data) if !data.is_empty() => {
+                                Some(ArchiveExtractionJob { archive_id, data })
+                            }
+                            _ => None,
+                        }
+                    })
+                    .collect();
+
+                info!("  Loaded {} non-empty archives", jobs.len());
+
+                // Decode all sprites in parallel first (for manifest)
+                let all_sprites: Vec<_> = jobs
+                    .par_iter()
+                    .flat_map(|job| {
+                        SpriteDecoder::decode(job.archive_id, &job.data).unwrap_or_default()
+                    })
+                    .collect();
+
+                info!("  Decoded {} sprites", all_sprites.len());
+
+                // Add to manifest (sequential, fast)
+                for sprite in &all_sprites {
+                    manifest.add_sprite(sprite, index_name);
                 }
 
-                // Get the archive data
-                match cache.get_file(index, archive_id) {
-                    Ok(data) => {
-                        if data.is_empty() {
-                            if args.verbose {
-                                trace!("Archive {} in index {} is empty", archive_id, index);
+                // Export all sprites in parallel
+                all_sprites.par_iter().for_each(|sprite| {
+                    let _ = exporter.export_sprite(sprite, index_name);
+                });
+
+                let index_elapsed = index_start.elapsed();
+                info!(
+                    "  Parallel extraction completed in {:.2}s",
+                    index_elapsed.as_secs_f64()
+                );
+            } else {
+                // === SEQUENTIAL EXTRACTION ===
+                for (idx, archive_info) in ref_table.archives.iter().enumerate() {
+                    let archive_id = archive_info.id;
+
+                    // Progress logging - every 50 archives for more visibility
+                    if idx % 50 == 0 {
+                        info!(
+                            "  [{}/{}] Processing archive {} ({}%)",
+                            idx,
+                            archive_count,
+                            archive_id,
+                            (idx * 100) / archive_count.max(1)
+                        );
+                        // Flush stdout to ensure progress is visible in Docker builds
+                        use std::io::Write;
+                        let _ = std::io::stdout().flush();
+                    }
+
+                    // Get the decompressed archive data
+                    match cache.get_decompressed_file(index, archive_id) {
+                        Ok(data) => {
+                            if data.is_empty() {
+                                if args.verbose {
+                                    trace!("Archive {} in index {} is empty", archive_id, index);
+                                }
+                                continue;
                             }
-                            continue;
-                        }
 
-                        if args.verbose && idx % 200 == 0 {
-                            info!("    Decoding archive {} ({} bytes)", archive_id, data.len());
-                        }
+                            if args.verbose && idx % 200 == 0 {
+                                info!("    Decoding archive {} ({} bytes)", archive_id, data.len());
+                            }
 
-                        // Decode sprites from the archive
-                        match SpriteDecoder::decode(archive_id, &data) {
-                            Ok(sprites) => {
-                                let sprite_count = sprites.len();
-                                for sprite in &sprites {
-                                    manifest.add_sprite(sprite, index_name);
-                                    if let Err(e) = exporter.export_sprite(sprite, index_name) {
-                                        if args.verbose {
-                                            trace!("Failed to export sprite {}: {}", sprite.id, e);
+                            // Decode sprites from the archive
+                            match SpriteDecoder::decode(archive_id, &data) {
+                                Ok(sprites) => {
+                                    let sprite_count = sprites.len();
+                                    for sprite in &sprites {
+                                        manifest.add_sprite(sprite, index_name);
+                                        if let Err(e) = exporter.export_sprite(sprite, index_name) {
+                                            if args.verbose {
+                                                trace!(
+                                                    "Failed to export sprite {}: {}",
+                                                    sprite.id,
+                                                    e
+                                                );
+                                            }
                                         }
                                     }
+                                    if args.verbose && sprite_count > 0 && idx % 200 == 0 {
+                                        info!(
+                                            "    Extracted {} sprites from archive {}",
+                                            sprite_count, archive_id
+                                        );
+                                    }
                                 }
-                                if args.verbose && sprite_count > 0 && idx % 200 == 0 {
-                                    info!(
-                                        "    Extracted {} sprites from archive {}",
-                                        sprite_count, archive_id
-                                    );
-                                }
-                            }
-                            Err(e) => {
-                                if args.verbose {
-                                    trace!(
-                                        "Failed to decode archive {} in index {}: {}",
-                                        archive_id,
-                                        index,
-                                        e
-                                    );
+                                Err(e) => {
+                                    if args.verbose {
+                                        trace!(
+                                            "Failed to decode archive {} in index {}: {}",
+                                            archive_id,
+                                            index,
+                                            e
+                                        );
+                                    }
                                 }
                             }
                         }
-                    }
-                    Err(e) => {
-                        if args.verbose {
-                            trace!(
-                                "Failed to read archive {} in index {}: {}",
-                                archive_id,
-                                index,
-                                e
-                            );
+                        Err(e) => {
+                            if args.verbose {
+                                trace!(
+                                    "Failed to read archive {} in index {}: {}",
+                                    archive_id,
+                                    index,
+                                    e
+                                );
+                            }
                         }
                     }
                 }

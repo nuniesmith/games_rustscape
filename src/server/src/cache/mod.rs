@@ -752,6 +752,35 @@ impl CacheStore {
         Ok(self.generate_stub_file(index, archive))
     }
 
+    /// Get a decompressed file from the cache (for sprite extraction, etc.)
+    ///
+    /// Unlike `get_file`, this method decompresses the container data before returning.
+    /// Use this when you need the actual file contents rather than raw JS5 container data.
+    pub fn get_decompressed_file(&self, index: u8, archive: u32) -> Result<Vec<u8>> {
+        // Try to read and decompress from real cache
+        if self.is_loaded() {
+            match self.read_container_data(index, archive) {
+                Ok(data) => match self.decompress_container(&data) {
+                    Ok(decompressed) => return Ok(decompressed),
+                    Err(e) => {
+                        trace!(
+                            "Failed to decompress container {}/{}: {}",
+                            index,
+                            archive,
+                            e
+                        );
+                    }
+                },
+                Err(e) => {
+                    trace!("Failed to read container {}/{}: {}", index, archive, e);
+                }
+            }
+        }
+
+        // Return empty data for failed reads
+        Ok(Vec::new())
+    }
+
     /// Get parsed reference table for an index
     pub fn get_parsed_reference_table(&self, index: u8) -> Option<ReferenceTable> {
         self.reference_tables.read().unwrap().get(&index).cloned()

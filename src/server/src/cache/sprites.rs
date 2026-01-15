@@ -19,7 +19,10 @@
 use std::fs::{self, File};
 use std::io::{Cursor, Write};
 use std::path::Path;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 
+use rayon::prelude::*;
 use tracing::{trace, warn};
 
 use crate::error::{CacheError, Result, RustscapeError};
@@ -496,10 +499,10 @@ impl SpriteDecoder {
 pub struct SpriteExporter {
     /// Output directory for exported sprites
     output_dir: std::path::PathBuf,
-    /// Number of sprites exported
-    exported_count: u32,
-    /// Number of sprites failed
-    failed_count: u32,
+    /// Number of sprites exported (atomic for thread safety)
+    exported_count: Arc<AtomicU32>,
+    /// Number of sprites failed (atomic for thread safety)
+    failed_count: Arc<AtomicU32>,
 }
 
 impl SpriteExporter {
@@ -507,15 +510,15 @@ impl SpriteExporter {
     pub fn new(output_dir: impl AsRef<Path>) -> Self {
         Self {
             output_dir: output_dir.as_ref().to_path_buf(),
-            exported_count: 0,
-            failed_count: 0,
+            exported_count: Arc::new(AtomicU32::new(0)),
+            failed_count: Arc::new(AtomicU32::new(0)),
         }
     }
 
-    /// Export a single sprite
-    pub fn export_sprite(&mut self, sprite: &Sprite, subdir: &str) -> Result<()> {
+    /// Export a single sprite (thread-safe)
+    pub fn export_sprite(&self, sprite: &Sprite, subdir: &str) -> Result<()> {
         if !sprite.is_valid() {
-            self.failed_count += 1;
+            self.failed_count.fetch_add(1, Ordering::Relaxed);
             return Ok(()); // Skip invalid sprites silently
         }
 
@@ -529,40 +532,107 @@ impl SpriteExporter {
 
         match sprite.export_png(&output_path) {
             Ok(()) => {
-                self.exported_count += 1;
+                self.exported_count.fetch_add(1, Ordering::Relaxed);
                 trace!("Exported sprite to {:?}", output_path);
                 Ok(())
             }
             Err(e) => {
-                self.failed_count += 1;
+                self.failed_count.fetch_add(1, Ordering::Relaxed);
                 warn!("Failed to export sprite {}: {}", sprite.id, e);
                 Err(e)
             }
         }
     }
 
-    /// Export multiple sprites
-    pub fn export_sprites(&mut self, sprites: &[Sprite], subdir: &str) -> Result<()> {
+    /// Export multiple sprites sequentially
+    pub fn export_sprites(&self, sprites: &[Sprite], subdir: &str) -> Result<()> {
         for sprite in sprites {
             let _ = self.export_sprite(sprite, subdir);
         }
         Ok(())
     }
 
+    /// Export multiple sprites in parallel using Rayon
+    ///
+    /// This provides significant speedup on multi-core systems by
+    /// parallelizing both PNG encoding and file I/O across threads.
+    pub fn export_sprites_parallel(&self, sprites: &[Sprite], subdir: &str) {
+        // Ensure output directory exists before parallel writes
+        let output_dir = self.output_dir.join(subdir);
+        let _ = fs::create_dir_all(&output_dir);
+
+        sprites.par_iter().for_each(|sprite| {
+            let _ = self.export_sprite(sprite, subdir);
+        });
+    }
+
     /// Get the number of successfully exported sprites
     pub fn exported_count(&self) -> u32 {
-        self.exported_count
+        self.exported_count.load(Ordering::Relaxed)
     }
 
     /// Get the number of failed exports
     pub fn failed_count(&self) -> u32 {
-        self.failed_count
+        self.failed_count.load(Ordering::Relaxed)
     }
 
     /// Get the output directory
     pub fn output_dir(&self) -> &Path {
         &self.output_dir
     }
+}
+
+/// Result of a parallel archive extraction job
+pub struct ArchiveExtractionJob {
+    pub archive_id: u32,
+    pub data: Vec<u8>,
+}
+
+/// Extract and export sprites from multiple archives in parallel
+///
+/// This is the highest-performance extraction method, parallelizing:
+/// 1. Sprite decoding from archives
+/// 2. PNG encoding
+/// 3. File I/O
+///
+/// Returns the number of sprites exported and failed.
+pub fn extract_archives_parallel(
+    archives: Vec<ArchiveExtractionJob>,
+    exporter: &SpriteExporter,
+    subdir: &str,
+) -> (u32, u32) {
+    // Ensure output directory exists
+    let output_dir = exporter.output_dir.join(subdir);
+    let _ = fs::create_dir_all(&output_dir);
+
+    // Process archives in parallel
+    archives.par_iter().for_each(|job| {
+        if job.data.is_empty() {
+            return;
+        }
+
+        // Decode sprites from archive
+        if let Ok(sprites) = SpriteDecoder::decode(job.archive_id, &job.data) {
+            // Export each sprite (this is already parallelized at the archive level)
+            for sprite in &sprites {
+                let _ = exporter.export_sprite(sprite, subdir);
+            }
+        }
+    });
+
+    (exporter.exported_count(), exporter.failed_count())
+}
+
+/// Batch decode sprites from multiple archives in parallel
+///
+/// Returns a vector of all decoded sprites from all archives.
+/// Useful when you want to process sprites further before exporting.
+pub fn decode_archives_parallel(archives: Vec<ArchiveExtractionJob>) -> Vec<Sprite> {
+    archives
+        .par_iter()
+        .filter(|job| !job.data.is_empty())
+        .flat_map(|job| SpriteDecoder::decode(job.archive_id, &job.data).unwrap_or_default())
+        .collect()
 }
 
 /// Sprite manifest entry for the web client

@@ -225,6 +225,9 @@ config/ssl/*.cnf
 cache/main_file_cache.dat2
 cache/main_file_cache.idx*
 
+# Extracted cache directory (created when unzipping disk.zip)
+cache/cache/
+
 # Ignore the old split parts (no longer used)
 cache/main_file_cache.dat2.part_*
 

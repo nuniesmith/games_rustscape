@@ -54,6 +54,9 @@ flate2 = "1.0"
 bzip2 = "0.4"
 lzma-rs = "0.3"
 
+# Parallel processing
+rayon = "1.10"
+
 # Checksums
 crc32fast = "1.3"
 
