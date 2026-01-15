@@ -1,31 +1,26 @@
 # ============================================================================
 # Rustscape - Git Attributes
 # ============================================================================
-
 # Auto detect text files and normalize line endings
 * text=auto
-
 # ============================================================================
 # Shell Scripts - Always use LF line endings
 # ============================================================================
 *.sh text eol=lf
 run.sh text eol=lf
 scripts/*.sh text eol=lf
-
 # ============================================================================
 # Windows Scripts - Use CRLF line endings
 # ============================================================================
 *.bat text eol=crlf
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
-
 # ============================================================================
 # Rust Files
 # ============================================================================
 *.rs text diff=rust
 Cargo.toml text
 Cargo.lock text -diff
-
 # ============================================================================
 # TypeScript/JavaScript Files
 # ============================================================================
@@ -37,7 +32,6 @@ Cargo.lock text -diff
 *.cjs text
 *.json text
 *.map text
-
 # ============================================================================
 # Web Files
 # ============================================================================
@@ -46,7 +40,6 @@ Cargo.lock text -diff
 *.scss text diff=css
 *.less text diff=css
 *.svg text
-
 # ============================================================================
 # Configuration Files
 # ============================================================================
@@ -62,7 +55,6 @@ Cargo.lock text -diff
 .editorconfig text
 .gitignore text
 .dockerignore text
-
 # ============================================================================
 # Documentation
 # ============================================================================
@@ -70,13 +62,11 @@ Cargo.lock text -diff
 *.txt text
 LICENSE text
 README text
-
 # ============================================================================
 # Docker Files
 # ============================================================================
 Dockerfile text
 docker-compose*.yml text
-
 # ============================================================================
 # Binary Files - Do not normalize
 # ============================================================================
@@ -86,7 +76,6 @@ docker-compose*.yml text
 *.so binary
 *.dylib binary
 *.a binary
-
 # Archives
 *.zip binary
 *.tar binary
@@ -97,7 +86,6 @@ docker-compose*.yml text
 *.xz binary
 *.7z binary
 *.rar binary
-
 # Images
 *.png binary
 *.jpg binary
@@ -107,38 +95,36 @@ docker-compose*.yml text
 *.webp binary
 *.bmp binary
 *.tiff binary
-
 # Fonts
 *.woff binary
 *.woff2 binary
 *.ttf binary
 *.otf binary
 *.eot binary
-
 # Game cache/data files
 *.dat binary
 *.idx binary
 *.jag binary
 *.cache binary
-
 # Database
 *.db binary
 *.sqlite binary
 *.sqlite3 binary
-
 # ============================================================================
 # Linguist Overrides - For GitHub language statistics
 # ============================================================================
 # Treat archive directory as vendored (not counted in stats)
 archive/** linguist-vendored
-
 # Ensure Rust is detected properly
 src/server/**/*.rs linguist-language=Rust
-
 # Ensure TypeScript is detected properly
 src/client/web/**/*.ts linguist-language=TypeScript
-
 # Mark generated files
 src/client/web/dist/** linguist-generated
 **/node_modules/** linguist-vendored
 target/** linguist-generated
+cache/*.idx* filter=lfs diff=lfs merge=lfs -text
+cache/*.zip filter=lfs diff=lfs merge=lfs -text
+cache/*.tar.gz filter=lfs diff=lfs merge=lfs -text
+cache/*.dat filter=lfs diff=lfs merge=lfs -text
+cache/*.dat2 filter=lfs diff=lfs merge=lfs -text

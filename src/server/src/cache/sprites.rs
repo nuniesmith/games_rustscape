@@ -227,11 +227,14 @@ static CRC32_TABLE: [u32; 256] = {
 };
 
 /// Compress data using zlib/deflate
+/// Uses fast compression (level 1) for speed during sprite extraction
 fn compress_zlib(data: &[u8]) -> Result<Vec<u8>> {
     use flate2::write::ZlibEncoder;
     use flate2::Compression;
 
-    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+    // Use fast compression (level 1) instead of default (level 6)
+    // This significantly speeds up sprite extraction with minimal size increase
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::fast());
     encoder
         .write_all(data)
         .map_err(|e| RustscapeError::Cache(CacheError::Io(format!("Compression failed: {}", e))))?;

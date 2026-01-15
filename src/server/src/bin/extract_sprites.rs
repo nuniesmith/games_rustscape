@@ -13,7 +13,7 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
-use tracing::{error, info, warn, Level};
+use tracing::{error, info, trace, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 
 // Import from the main crate
@@ -213,7 +213,9 @@ fn run_extraction(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             _ => "unknown",
         };
 
+        info!("========================================");
         info!("Extracting index {} ({})...", index, index_name);
+        info!("========================================");
 
         let mut manifest = SpriteManifest::new(index_name);
 
@@ -225,14 +227,18 @@ fn run_extraction(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             for (idx, archive_info) in ref_table.archives.iter().enumerate() {
                 let archive_id = archive_info.id;
 
-                // Progress logging
-                if idx > 0 && idx % 100 == 0 {
+                // Progress logging - every 50 archives for more visibility
+                if idx % 50 == 0 {
                     info!(
-                        "  Progress: {}/{} archives ({}%)",
+                        "  [{}/{}] Processing archive {} ({}%)",
                         idx,
                         archive_count,
-                        (idx * 100) / archive_count
+                        archive_id,
+                        (idx * 100) / archive_count.max(1)
                     );
+                    // Flush stdout to ensure progress is visible in Docker builds
+                    use std::io::Write;
+                    let _ = std::io::stdout().flush();
                 }
 
                 // Get the archive data
@@ -240,23 +246,41 @@ fn run_extraction(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
                     Ok(data) => {
                         if data.is_empty() {
                             if args.verbose {
-                                warn!("Archive {} in index {} is empty", archive_id, index);
+                                trace!("Archive {} in index {} is empty", archive_id, index);
                             }
                             continue;
                         }
+
+                        if args.verbose && idx % 200 == 0 {
+                            info!("    Decoding archive {} ({} bytes)", archive_id, data.len());
+                        }
+
                         // Decode sprites from the archive
                         match SpriteDecoder::decode(archive_id, &data) {
                             Ok(sprites) => {
+                                let sprite_count = sprites.len();
                                 for sprite in &sprites {
                                     manifest.add_sprite(sprite, index_name);
-                                    let _ = exporter.export_sprite(sprite, index_name);
+                                    if let Err(e) = exporter.export_sprite(sprite, index_name) {
+                                        if args.verbose {
+                                            trace!("Failed to export sprite {}: {}", sprite.id, e);
+                                        }
+                                    }
+                                }
+                                if args.verbose && sprite_count > 0 && idx % 200 == 0 {
+                                    info!(
+                                        "    Extracted {} sprites from archive {}",
+                                        sprite_count, archive_id
+                                    );
                                 }
                             }
                             Err(e) => {
                                 if args.verbose {
-                                    warn!(
+                                    trace!(
                                         "Failed to decode archive {} in index {}: {}",
-                                        archive_id, index, e
+                                        archive_id,
+                                        index,
+                                        e
                                     );
                                 }
                             }
@@ -264,9 +288,11 @@ fn run_extraction(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
                     }
                     Err(e) => {
                         if args.verbose {
-                            warn!(
+                            trace!(
                                 "Failed to read archive {} in index {}: {}",
-                                archive_id, index, e
+                                archive_id,
+                                index,
+                                e
                             );
                         }
                     }
@@ -276,11 +302,18 @@ fn run_extraction(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             warn!("No reference table found for index {}", index);
         }
 
+        info!(
+            "  Completed index {} - extracted {} sprites so far",
+            index,
+            exporter.exported_count()
+        );
         manifests.push((index_name.to_string(), manifest));
     }
 
-    // Save manifests
+    info!("");
+    info!("========================================");
     info!("Saving manifests...");
+    info!("========================================");
     for (name, manifest) in &manifests {
         let manifest_path = args.output_path.join(format!("{}_manifest.json", name));
         if let Err(e) = manifest.save(&manifest_path) {

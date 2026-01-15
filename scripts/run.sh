@@ -644,6 +644,13 @@ start_services() {
         build_kmp_web || log_warn "KMP build failed, continuing with existing files..."
     fi
 
+    # NOTE: Sprite extraction disabled for now (slow PNG encoding)
+    # Run './run.sh sprites extract' manually if needed
+    # if check_cache_files && [ ! -f "$SPRITES_DIR/sprites/manifest.json" ]; then
+    #     log_info "Extracting sprites from cache (first time setup)..."
+    #     extract_sprites_fast || log_warn "Sprite extraction failed, continuing without sprites..."
+    # fi
+
     log_info "Stopping existing services..."
     docker compose down --remove-orphans 2>/dev/null || true
 
@@ -698,6 +705,13 @@ start_dev() {
         log_info "Building KMP web client..."
         build_kmp_web || log_warn "KMP build failed, continuing with existing files..."
     fi
+
+    # NOTE: Sprite extraction disabled for now (slow PNG encoding)
+    # Run './run.sh sprites extract' manually if needed
+    # if check_cache_files && [ ! -f "$SPRITES_DIR/sprites/manifest.json" ]; then
+    #     log_info "Extracting sprites from cache (first time setup)..."
+    #     extract_sprites_fast || log_warn "Sprite extraction failed, continuing without sprites..."
+    # fi
 
     log_info "Stopping existing services..."
     docker compose --profile dev down --remove-orphans 2>/dev/null || true
@@ -937,7 +951,7 @@ setup_cache() {
     fi
 }
 
-# Extract sprites from cache
+# Extract sprites from cache (full extraction with verbose output)
 extract_sprites() {
     log_step "Extracting sprites from game cache..."
 
@@ -951,7 +965,7 @@ extract_sprites() {
     log_info "Building sprite extractor..."
     cd "$PROJECT_DIR/src/server"
 
-    if ! cargo build --release --bin extract-sprites 2>/dev/null; then
+    if ! cargo build --release --bin extract-sprites 2>&1 | tail -5; then
         log_error "Failed to build sprite extractor"
         cd "$PROJECT_DIR"
         return 1
@@ -962,14 +976,18 @@ extract_sprites() {
     # Create output directory
     mkdir -p "$SPRITES_DIR"
 
-    # Run extraction
+    # Run extraction with progress output
     log_info "Extracting sprites (this may take a while)..."
-    ./src/server/target/release/extract-sprites \
+    log_info "Progress will be shown every 50 archives..."
+
+    RUST_LOG=info ./src/server/target/release/extract-sprites \
         --cache "$CACHE_DIR" \
         --output "$SPRITES_DIR" \
-        --verbose
+        --verbose 2>&1 | while IFS= read -r line; do
+            echo "$line"
+        done
 
-    if [ $? -eq 0 ]; then
+    if [ ${PIPESTATUS[0]} -eq 0 ]; then
         log_success "Sprite extraction complete!"
         log_info "Sprites saved to: $SPRITES_DIR"
 
@@ -978,6 +996,43 @@ extract_sprites() {
         log_info "Extracted $count sprite images"
     else
         log_error "Sprite extraction failed"
+        return 1
+    fi
+}
+
+# Fast sprite extraction (fewer logs, used during start)
+extract_sprites_fast() {
+    if ! check_cache_files; then
+        return 1
+    fi
+
+    # Build extractor if needed
+    cd "$PROJECT_DIR/src/server"
+    if [ ! -f "target/release/extract-sprites" ]; then
+        log_info "Building sprite extractor..."
+        cargo build --release --bin extract-sprites 2>/dev/null || {
+            cd "$PROJECT_DIR"
+            return 1
+        }
+    fi
+    cd "$PROJECT_DIR"
+
+    # Create output directory
+    mkdir -p "$SPRITES_DIR"
+
+    log_info "Extracting sprites from cache..."
+
+    # Run with minimal output
+    ./src/server/target/release/extract-sprites \
+        --cache "$CACHE_DIR" \
+        --output "$SPRITES_DIR" 2>&1 | grep -E "^[0-9]|INFO|SUCCESS|ERROR|Complete" || true
+
+    local count=$(find "$SPRITES_DIR" -name "*.png" 2>/dev/null | wc -l)
+    if [ "$count" -gt 0 ]; then
+        log_success "Extracted $count sprites"
+        return 0
+    else
+        log_warn "No sprites extracted"
         return 1
     fi
 }

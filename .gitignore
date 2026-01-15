@@ -221,16 +221,32 @@ config/ssl/*.cnf
 # ============================================================================
 # GAME CACHE & SPRITES
 # ============================================================================
-# Cache files - the assembled dat2 file (generated from parts)
+# Cache files - ignore extracted/assembled files (generated during build)
 cache/main_file_cache.dat2
+cache/main_file_cache.idx*
 
-# Track the split parts (20MB chunks, safe for GitHub)
-!cache/main_file_cache.dat2.part_*
+# Ignore the old split parts (no longer used)
+cache/main_file_cache.dat2.part_*
 
-# Track index files (small)
-!cache/main_file_cache.idx*
+# Ignore redundant archives and generated files
+cache/*.tar.gz
+cache/rs_cache.zip
+cache/keys-*.zip
+cache/map-*.png
+cache/cache-*.zip
 
-# Track the assembly script
+# Track disk.zip from OpenRS2 (66MB, under GitHub 100MB limit)
+# Download from: https://archive.openrs2.org/caches/runescape/254/disk.zip
+# Contains main_file_cache.dat2 + all .idx* files in traditional format
+!cache/disk.zip
+
+# Track XTEA keys for map decryption (needed for archive 5)
+!cache/keys-runescape-live-en-b530-2009-02-01-00-00-00-openrs2#254.json
+
+# Track documentation and scripts
+!cache/README.md
+!cache/.gitkeep
+
 !cache/assemble.sh
 !cache/.gitkeep
 

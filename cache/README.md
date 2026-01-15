@@ -2,80 +2,87 @@
 
 This directory contains the RuneScape revision 530 game cache files used for rendering sprites, textures, maps, and other game assets.
 
-## File Structure
+## Quick Start
 
-The cache consists of:
-- **`main_file_cache.dat2`** - Main data file containing all game assets (~86MB)
-- **`main_file_cache.idx0` - `idx255`** - Index files that map to data locations
+The cache is stored as `disk.zip` (66MB) from [OpenRS2 Archive #254](https://archive.openrs2.org/caches/runescape/254).
 
-## Split Files for GitHub
+During Docker build, the cache is automatically extracted and sprites are exported to PNG files.
 
-Since GitHub has a 100MB file size limit, the large `main_file_cache.dat2` file is split into 20MB chunks:
+## Files
 
-```
-main_file_cache.dat2.part_aa  (20MB)
-main_file_cache.dat2.part_ab  (20MB)
-main_file_cache.dat2.part_ac  (20MB)
-main_file_cache.dat2.part_ad  (20MB)
-main_file_cache.dat2.part_ae  (~5MB)
-```
+| File | Size | Description |
+|------|------|-------------|
+| `disk.zip` | 66MB | OpenRS2 cache archive (traditional `.dat2/.idx` format) |
+| `keys-*.json` | 241KB | XTEA encryption keys for map decryption |
 
-## Assembling the Cache
+## Cache Contents (inside disk.zip)
 
-The cache is automatically assembled when you run any cache-related command:
+The zip contains the traditional Jagex cache format:
+- **`main_file_cache.dat2`** - Main data file containing all game assets (~89MB)
+- **`main_file_cache.idx0` - `idx27`** - Index files that map to data locations
+- **`main_file_cache.idx255`** - Reference index containing metadata
 
-```bash
-./run.sh cache check
-# or
-./run.sh sprites extract
-```
+## Cache Indices
 
-You can also manually assemble it:
-
-```bash
-cd cache
-./assemble.sh
-# or manually:
-cat main_file_cache.dat2.part_* > main_file_cache.dat2
-```
-
-## Cache Source
-
-This cache was downloaded from the [OpenRS2 Archive](https://archive.openrs2.org/caches/runescape/254), which maintains historical RuneScape cache files.
-
-- **Revision**: 530
-- **Era**: ~2009 (HD update era)
-- **Size**: ~65MB compressed, ~86MB uncompressed
+| Index | Contents | Groups | Description |
+|-------|----------|--------|-------------|
+| 0 | Animations | 2,724 | Animation sequences |
+| 1 | Skeletons | 2,435 | Animation skeletons |
+| 2 | Configs | 20 | Game configuration data |
+| 3 | Interfaces | 832 | UI interface definitions |
+| 4 | Sound FX | 5,846 | Sound effects |
+| 5 | Maps | 3,682 | World map data (XTEA encrypted) |
+| 6 | Music | 625 | Background music |
+| 7 | Models | 45,468 | 3D models |
+| 8 | **Sprites** | 1,707 | UI sprites and icons |
+| 9 | Textures | 680 | Ground and object textures |
+| 10-27 | Various | - | Other game data |
 
 ## Extracting Sprites
 
-Once the cache is assembled, you can extract sprites for the web client:
+Sprites are extracted automatically during Docker build. To extract manually:
 
 ```bash
-./run.sh sprites extract
+# Extract cache files
+cd cache
+unzip -o disk.zip
+
+# Build and run the sprite extractor
+cd ..
+cargo build --release --bin extract-sprites
+./target/release/extract-sprites \
+    --cache ./cache/cache \
+    --output ./src/clients/web/public/sprites \
+    --verbose
 ```
 
-This will:
-1. Build the sprite extraction tool
-2. Extract UI sprites (index 8)
-3. Extract textures (index 32)
-4. Save PNG files to `src/clients/web/public/sprites/`
+## Downloading Fresh Cache
 
-## Cache Contents
+To download the latest cache from OpenRS2:
 
-| Index | Contents | Description |
-|-------|----------|-------------|
-| 0 | Animations | Animation sequences |
-| 1 | Skeletons | Animation skeletons |
-| 2 | Configs | Game configuration data |
-| 3 | Interfaces | UI interface definitions |
-| 4 | Sound effects | Audio files |
-| 5 | Maps | World map data |
-| 6 | Music | Background music |
-| 7 | Models | 3D models |
-| 8 | Sprites | UI sprites and icons |
-| 9 | Textures | Ground and object textures |
-| 10+ | Various | Other game data |
+```bash
+cd cache
+curl -L -o disk.zip "https://archive.openrs2.org/caches/runescape/254/disk.zip"
+```
+
+## XTEA Keys
+
+The `keys-*.json` file contains XTEA encryption keys for map data (archive 5). These are required to decrypt map terrain and location data. Sprites (archive 8) are not encrypted.
+
+## Docker Build Process
+
+1. Copy `disk.zip` into the build context
+2. Extract cache files: `unzip -o disk.zip`
+3. Build sprite extractor from Rust source
+4. Run extraction: `extract-sprites --cache ./cache --output /sprites`
+5. Copy extracted PNGs to nginx static files
+
+## Source
+
+- **Archive**: [OpenRS2 #254](https://archive.openrs2.org/caches/runescape/254)
+- **Revision**: 530
+- **Era**: ~2009 (HD update era)
+- **Format**: Traditional `.dat2/.idx` disk format
 
 ## Legal Notice
 
