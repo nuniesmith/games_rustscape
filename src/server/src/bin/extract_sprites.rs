@@ -20,8 +20,8 @@ use tracing_subscriber::FmtSubscriber;
 
 // Import from the main crate
 use rustscape_server::cache::sprites::{
-    ArchiveExtractionJob, SpriteDecoder, SpriteExporter, SpriteManifest, EXTRA_SPRITE_INDEX,
-    SPRITE_INDEX, TEXTURE_INDEX,
+    ArchiveExtractionJob, ImageFormat, SpriteDecoder, SpriteExporter, SpriteManifest,
+    SpriteSheetConfig, SpriteSheetGenerator, EXTRA_SPRITE_INDEX, SPRITE_INDEX, TEXTURE_INDEX,
 };
 use rustscape_server::cache::CacheStore;
 
@@ -39,6 +39,12 @@ struct Args {
     parallel: bool,
     /// Number of threads to use (0 = auto-detect)
     threads: usize,
+    /// Output image format (png or qoi)
+    format: ImageFormat,
+    /// Generate sprite sheets (texture atlases) instead of individual files
+    atlas: bool,
+    /// Maximum sprite sheet size (width and height)
+    atlas_size: u32,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -50,6 +56,9 @@ fn parse_args() -> Result<Args, String> {
     let mut verbose = false;
     let mut parallel = true; // Default to parallel for best performance
     let mut threads: usize = 0; // 0 = auto-detect
+    let mut format = ImageFormat::Png; // Default to PNG for compatibility
+    let mut atlas = false;
+    let mut atlas_size: u32 = 2048;
 
     let mut i = 1;
     while i < args.len() {
@@ -97,6 +106,32 @@ fn parse_args() -> Result<Args, String> {
                     .parse()
                     .map_err(|_| format!("Invalid threads value: {}", args[i]))?;
             }
+            "--format" | "-f" => {
+                i += 1;
+                if i >= args.len() {
+                    return Err("Missing value for --format".to_string());
+                }
+                format = ImageFormat::from_str(&args[i])
+                    .ok_or_else(|| format!("Invalid format '{}'. Use 'png' or 'qoi'", args[i]))?;
+            }
+            "--qoi" => {
+                format = ImageFormat::Qoi;
+            }
+            "--png" => {
+                format = ImageFormat::Png;
+            }
+            "--atlas" | "-a" => {
+                atlas = true;
+            }
+            "--atlas-size" => {
+                i += 1;
+                if i >= args.len() {
+                    return Err("Missing value for --atlas-size".to_string());
+                }
+                atlas_size = args[i]
+                    .parse()
+                    .map_err(|_| format!("Invalid atlas size: {}", args[i]))?;
+            }
             "--help" | "-h" => {
                 print_help();
                 std::process::exit(0);
@@ -118,6 +153,9 @@ fn parse_args() -> Result<Args, String> {
         verbose,
         parallel,
         threads,
+        format,
+        atlas,
+        atlas_size,
     })
 }
 
@@ -138,6 +176,11 @@ REQUIRED:
 
 OPTIONS:
     -i, --index <ID>       Extract only a specific index (8=sprites, 32=textures)
+    -f, --format <FMT>     Output format: 'png' (default) or 'qoi' (faster)
+        --png              Use PNG format (default, best compatibility)
+        --qoi              Use QOI format (3-4x faster encoding, slightly larger)
+    -a, --atlas            Generate sprite sheets (texture atlases)
+        --atlas-size <N>   Maximum atlas size in pixels (default: 2048)
     -p, --parallel         Use parallel extraction (default, recommended)
     -s, --sequential       Use sequential extraction (slower, for debugging)
     -t, --threads <N>      Number of threads to use (0 = auto-detect, default)
@@ -145,8 +188,17 @@ OPTIONS:
     -h, --help             Print this help message
 
 EXAMPLES:
-    # Extract all sprites (parallel by default)
+    # Extract all sprites as PNG (default)
     extract_sprites --cache ./cache --output ./assets/sprites
+
+    # Extract as QOI for faster encoding
+    extract_sprites --cache ./cache --output ./assets/sprites --qoi
+
+    # Generate sprite sheets (texture atlases)
+    extract_sprites --cache ./cache --output ./assets/sprites --atlas
+
+    # Generate 4096x4096 sprite sheets in QOI format
+    extract_sprites --cache ./cache --output ./assets/sprites --atlas --atlas-size 4096 --qoi
 
     # Extract with specific thread count
     extract_sprites --cache ./cache --output ./assets/sprites --threads 8
@@ -165,9 +217,19 @@ CACHE INDICES:
     32 - Textures (ground textures, object textures)
     34 - Additional sprites (varies by revision)
 
+FORMATS:
+    png - Universal compatibility, best compression, slower encoding
+    qoi - 3-4x faster encoding, lossless, slightly larger files (~20-30%)
+
+SPRITE SHEETS:
+    Use --atlas to combine sprites into texture atlases (sprite sheets).
+    Benefits: fewer HTTP requests, fewer GPU texture switches, better batching.
+    Each atlas is a single image with a JSON manifest for sprite locations.
+
 PERFORMANCE:
     Parallel extraction uses all available CPU cores by default.
     On a typical 8-core system, expect 4-8x speedup over sequential.
+    QOI format provides additional 3-4x speedup over PNG encoding.
 "#
     );
 }
@@ -227,13 +289,19 @@ fn run_extraction(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     info!("Cache path: {:?}", args.cache_path);
     info!("Output path: {:?}", args.output_path);
     info!(
-        "Mode: {} ({} threads)",
+        "Mode: {} ({} threads), Format: {}, Atlas: {}",
         if args.parallel {
             "parallel"
         } else {
             "sequential"
         },
-        num_threads
+        num_threads,
+        args.format.extension().to_uppercase(),
+        if args.atlas {
+            format!("yes ({}x{})", args.atlas_size, args.atlas_size)
+        } else {
+            "no".to_string()
+        }
     );
 
     // Check if cache directory exists
@@ -260,8 +328,20 @@ fn run_extraction(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         vec![SPRITE_INDEX, TEXTURE_INDEX, EXTRA_SPRITE_INDEX]
     };
 
-    // Create exporter
-    let exporter = SpriteExporter::new(&args.output_path);
+    // Create exporter with specified format
+    let exporter = SpriteExporter::with_format(&args.output_path, args.format);
+
+    // Create sprite sheet generator if atlas mode is enabled
+    let sheet_generator = if args.atlas {
+        Some(SpriteSheetGenerator::with_config(SpriteSheetConfig {
+            max_width: args.atlas_size,
+            max_height: args.atlas_size,
+            padding: 1,
+            format: args.format,
+        }))
+    } else {
+        None
+    };
 
     // Create manifests for each index
     let mut manifests: Vec<(String, SpriteManifest)> = Vec::new();
@@ -319,13 +399,37 @@ fn run_extraction(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
 
                 // Add to manifest (sequential, fast)
                 for sprite in &all_sprites {
-                    manifest.add_sprite(sprite, index_name);
+                    manifest.add_sprite_with_format(sprite, index_name, args.format);
                 }
 
-                // Export all sprites in parallel
-                all_sprites.par_iter().for_each(|sprite| {
-                    let _ = exporter.export_sprite(sprite, index_name);
-                });
+                // Export sprites
+                if let Some(ref generator) = sheet_generator {
+                    // Generate sprite sheets
+                    let sheets = generator.generate(&all_sprites, index_name);
+                    info!("  Generated {} sprite sheets", sheets.len());
+
+                    // Save sprite sheets
+                    let atlas_dir = args.output_path.join(index_name);
+                    let _ = std::fs::create_dir_all(&atlas_dir);
+
+                    for (sheet_data, atlas) in &sheets {
+                        let sheet_path = atlas_dir.join(&atlas.image);
+                        if let Err(e) = std::fs::write(&sheet_path, sheet_data) {
+                            warn!("Failed to write sprite sheet: {}", e);
+                        }
+
+                        // Save atlas JSON
+                        let atlas_json_path = atlas_dir.join(format!("{}.json", atlas.name));
+                        if let Ok(json) = serde_json::to_string_pretty(&atlas) {
+                            let _ = std::fs::write(&atlas_json_path, json);
+                        }
+                    }
+                } else {
+                    // Export all sprites in parallel as individual files
+                    all_sprites.par_iter().for_each(|sprite| {
+                        let _ = exporter.export_sprite(sprite, index_name);
+                    });
+                }
 
                 let index_elapsed = index_start.elapsed();
                 info!(
@@ -370,14 +474,22 @@ fn run_extraction(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
                                 Ok(sprites) => {
                                     let sprite_count = sprites.len();
                                     for sprite in &sprites {
-                                        manifest.add_sprite(sprite, index_name);
-                                        if let Err(e) = exporter.export_sprite(sprite, index_name) {
-                                            if args.verbose {
-                                                trace!(
-                                                    "Failed to export sprite {}: {}",
-                                                    sprite.id,
-                                                    e
-                                                );
+                                        manifest.add_sprite_with_format(
+                                            sprite,
+                                            index_name,
+                                            args.format,
+                                        );
+                                        if sheet_generator.is_none() {
+                                            if let Err(e) =
+                                                exporter.export_sprite(sprite, index_name)
+                                            {
+                                                if args.verbose {
+                                                    trace!(
+                                                        "Failed to export sprite {}: {}",
+                                                        sprite.id,
+                                                        e
+                                                    );
+                                                }
                                             }
                                         }
                                     }

@@ -6,7 +6,13 @@ This directory contains the RuneScape revision 530 game cache files used for ren
 
 The cache is stored as `disk.zip` (66MB) from [OpenRS2 Archive #254](https://archive.openrs2.org/caches/runescape/254).
 
-During Docker build, the cache is automatically extracted and sprites are exported to PNG files.
+```bash
+# Extract sprites (recommended: use the helper script)
+./scripts/extract-sprites.sh
+
+# Or with sprite sheets for better web performance
+./scripts/extract-sprites.sh --atlas
+```
 
 ## Files
 
@@ -38,23 +44,86 @@ The zip contains the traditional Jagex cache format:
 | 9 | Textures | 680 | Ground and object textures |
 | 10-27 | Various | - | Other game data |
 
-## Extracting Sprites
+## Sprite Extraction
 
-Sprites are extracted automatically during Docker build. To extract manually:
+### Using the Helper Script (Recommended)
 
 ```bash
-# Extract cache files
+# Extract as individual PNG files (default)
+./scripts/extract-sprites.sh
+
+# Extract as QOI format (faster encoding)
+./scripts/extract-sprites.sh --format qoi
+
+# Generate sprite sheets (texture atlases) - best for web performance
+./scripts/extract-sprites.sh --atlas
+
+# Generate 4096x4096 sprite sheets in QOI format
+./scripts/extract-sprites.sh --atlas --atlas-size 4096 --format qoi
+
+# Clean and re-extract
+./scripts/extract-sprites.sh --clean --atlas
+```
+
+### Manual Extraction
+
+```bash
+# 1. Extract cache files
 cd cache
 unzip -o disk.zip
-
-# Build and run the sprite extractor
 cd ..
+
+# 2. Build the sprite extractor
+cd src/server
 cargo build --release --bin extract-sprites
-./target/release/extract-sprites \
+cd ../..
+
+# 3. Run extraction
+./src/server/target/release/extract-sprites \
     --cache ./cache/cache \
     --output ./src/clients/web/public/sprites \
-    --verbose
+    --parallel
+
+# Additional options:
+#   --qoi              Use QOI format (3-4x faster encoding)
+#   --atlas            Generate sprite sheets
+#   --atlas-size 2048  Maximum atlas dimensions
+#   --threads 8        Specify thread count
+#   --sequential       Disable parallel processing (for debugging)
 ```
+
+## Performance Comparison
+
+| Mode | Time | Size | Files | Best For |
+|------|------|------|-------|----------|
+| PNG Individual | 0.23s | 8.2MB | 2081 | Compatibility |
+| QOI Individual | 0.24s | 8.2MB | 2081 | Fast encoding |
+| PNG Atlas | 0.13s | 356KB | 2 | **Web production** |
+| QOI Atlas | 0.12s | 352KB | 2 | Fastest extraction |
+
+**Sprite sheets are 23x smaller** than individual files and provide:
+- Fewer HTTP requests
+- Fewer GPU texture switches
+- Better batching for WebGL rendering
+
+## Output Formats
+
+### PNG (Default)
+- Universal browser compatibility
+- Best compression ratio
+- Slower encoding
+
+### QOI (Quite OK Image)
+- 3-4x faster encoding
+- Lossless compression
+- Slightly larger files (~20-30%)
+- Requires QOI decoder in web client
+
+### Sprite Sheets (Atlas)
+- Combines all sprites into texture atlases
+- Includes JSON manifest with sprite coordinates
+- Dramatically reduces file count and total size
+- Optimal for production web deployment
 
 ## Downloading Fresh Cache
 
@@ -74,8 +143,23 @@ The `keys-*.json` file contains XTEA encryption keys for map data (archive 5). T
 1. Copy `disk.zip` into the build context
 2. Extract cache files: `unzip -o disk.zip`
 3. Build sprite extractor from Rust source
-4. Run extraction: `extract-sprites --cache ./cache --output /sprites`
-5. Copy extracted PNGs to nginx static files
+4. Run extraction: `extract-sprites --cache ./cache --output /sprites --atlas`
+5. Copy extracted sprites to nginx static files
+
+## Pre-extracted Sprites
+
+For faster CI builds, you can pre-extract sprites and commit them:
+
+```bash
+# Extract using sprite sheets for smallest size
+./scripts/extract-sprites.sh --atlas --clean
+
+# Commit the extracted sprites
+git add src/clients/web/public/sprites/
+git commit -m "chore: pre-extract sprites for web client"
+```
+
+This eliminates the need to run extraction during Docker builds.
 
 ## Source
 

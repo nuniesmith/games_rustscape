@@ -50,9 +50,14 @@ bcrypt = "0.15"
 jsonwebtoken = "9.2"
 
 # Compression
-flate2 = "1.0"
+# Use zlib-ng backend for SIMD-optimized compression (2-3x faster than default miniz)
+flate2 = { version = "1.0", features = ["zlib-ng"], default-features = false }
 bzip2 = "0.4"
 lzma-rs = "0.3"
+
+# Fast image encoding
+# QOI (Quite OK Image) - 3-4x faster than PNG, lossless, slightly larger files
+rapid-qoi = "0.6"
 
 # Parallel processing
 rayon = "1.10"
