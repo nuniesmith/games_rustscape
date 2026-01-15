@@ -77,7 +77,7 @@ async fn main() -> Result<()> {
         }
     };
 
-    // Start the game world tick (with persistence if available)
+    // Start the game world tick (with persistence and sync if available)
     let world_state = state.clone();
     let world_persistence = db_pool.clone();
     let mut world_shutdown_rx = shutdown_tx.subscribe();
@@ -86,10 +86,21 @@ async fn main() -> Result<()> {
             let persistence = rustscape_server::game::persistence::PlayerPersistence::new(pool);
             world_state
                 .world
-                .run_with_persistence(&mut world_shutdown_rx, Some(&persistence))
+                .run_with_sync(
+                    &mut world_shutdown_rx,
+                    Some(&persistence),
+                    Some(&world_state.session_manager),
+                )
                 .await;
         } else {
-            world_state.world.run(&mut world_shutdown_rx).await;
+            world_state
+                .world
+                .run_with_sync(
+                    &mut world_shutdown_rx,
+                    None,
+                    Some(&world_state.session_manager),
+                )
+                .await;
         }
     });
 

@@ -9,10 +9,13 @@
 //!
 //! All in-game packets are encrypted with ISAAC cipher.
 
-use tracing::{debug, trace, warn};
+use std::sync::Arc;
+
+use tracing::{debug, info, trace, warn};
 
 use crate::crypto::IsaacPair;
 use crate::error::Result;
+use crate::game::player::{Location, Player};
 use crate::net::buffer::PacketBuffer;
 
 /// Incoming packet sizes (0 = variable byte, -1 = variable short, >0 = fixed)
@@ -206,9 +209,87 @@ impl OutgoingGamePacket {
     }
 }
 
+/// Movement request from client
+#[derive(Debug, Clone)]
+pub struct MovementRequest {
+    /// Destination X coordinate
+    pub dest_x: u16,
+    /// Destination Y coordinate
+    pub dest_y: u16,
+    /// Whether the player is running
+    pub running: bool,
+    /// Path waypoints (intermediate steps)
+    pub waypoints: Vec<(i8, i8)>,
+}
+
+/// Result of processing a game packet
+#[derive(Debug)]
+pub struct PacketResult {
+    /// Response packets to send to the client
+    pub responses: Vec<OutgoingGamePacket>,
+    /// Movement request if this was a walk packet
+    pub movement: Option<MovementRequest>,
+    /// Chat message to broadcast
+    pub chat_message: Option<String>,
+    /// Command to execute
+    pub command: Option<String>,
+}
+
+impl PacketResult {
+    /// Create an empty result
+    pub fn empty() -> Self {
+        Self {
+            responses: Vec::new(),
+            movement: None,
+            chat_message: None,
+            command: None,
+        }
+    }
+
+    /// Create a result with responses
+    pub fn with_responses(responses: Vec<OutgoingGamePacket>) -> Self {
+        Self {
+            responses,
+            movement: None,
+            chat_message: None,
+            command: None,
+        }
+    }
+
+    /// Create a result with a movement request
+    pub fn with_movement(movement: MovementRequest) -> Self {
+        Self {
+            responses: Vec::new(),
+            movement: Some(movement),
+            chat_message: None,
+            command: None,
+        }
+    }
+
+    /// Create a result with a command
+    pub fn with_command(command: String) -> Self {
+        Self {
+            responses: Vec::new(),
+            movement: None,
+            chat_message: None,
+            command: Some(command),
+        }
+    }
+
+    /// Create a result with a chat message
+    pub fn with_chat(message: String) -> Self {
+        Self {
+            responses: Vec::new(),
+            movement: None,
+            chat_message: Some(message),
+            command: None,
+        }
+    }
+}
+
 /// Game packet handler
 pub struct GamePacketHandler {
-    // Future: add references to world, player manager, etc.
+    // Stateless handler - player context is passed to process methods
 }
 
 impl GamePacketHandler {
@@ -228,7 +309,7 @@ impl GamePacketHandler {
     }
 
     /// Process an incoming game packet
-    pub fn process(&self, packet: &IncomingGamePacket) -> Result<Option<Vec<OutgoingGamePacket>>> {
+    pub fn process(&self, packet: &IncomingGamePacket) -> Result<PacketResult> {
         trace!(
             opcode = packet.opcode,
             size = packet.data.len(),
@@ -248,42 +329,179 @@ impl GamePacketHandler {
             _ => {
                 if self.is_valid_opcode(packet.opcode) {
                     debug!(opcode = packet.opcode, "Unimplemented game packet");
-                    Ok(None)
+                    Ok(PacketResult::empty())
                 } else {
                     warn!(opcode = packet.opcode, "Unknown game packet");
-                    Ok(None)
+                    Ok(PacketResult::empty())
                 }
             }
         }
     }
 
-    /// Handle keep-alive packet
-    fn handle_keepalive(
+    /// Process a packet with player context
+    /// This version can update player state directly
+    pub fn process_with_player(
         &self,
-        _packet: &IncomingGamePacket,
-    ) -> Result<Option<Vec<OutgoingGamePacket>>> {
+        packet: &IncomingGamePacket,
+        player: &Arc<Player>,
+    ) -> Result<PacketResult> {
+        let result = self.process(packet)?;
+
+        // Apply movement if present
+        if let Some(ref movement) = result.movement {
+            self.apply_movement(player, movement);
+        }
+
+        // Handle commands with player context
+        if let Some(ref command) = result.command {
+            return self.execute_command(player, command);
+        }
+
+        Ok(result)
+    }
+
+    /// Apply movement to a player
+    fn apply_movement(&self, player: &Arc<Player>, movement: &MovementRequest) {
+        let current = player.location();
+        let dest = Location::new(movement.dest_x, movement.dest_y, current.z);
+
+        // Set running state
+        *player.running.write() = movement.running;
+
+        // For now, just teleport to the destination
+        // In a full implementation, this would queue the movement path
+        // and process it tick by tick
+        player.set_location(dest);
+
+        debug!(
+            player = %player.username(),
+            from = %current,
+            to = %dest,
+            running = movement.running,
+            waypoints = movement.waypoints.len(),
+            "Player movement processed"
+        );
+    }
+
+    /// Execute a command with player context
+    fn execute_command(&self, player: &Arc<Player>, command: &str) -> Result<PacketResult> {
+        let parts: Vec<&str> = command.split_whitespace().collect();
+        if parts.is_empty() {
+            return Ok(PacketResult::empty());
+        }
+
+        let cmd = parts[0].to_lowercase();
+        let args = &parts[1..];
+
+        info!(
+            player = %player.username(),
+            command = %cmd,
+            args = ?args,
+            "Executing command"
+        );
+
+        match cmd.as_str() {
+            "pos" | "mypos" | "coords" => {
+                let loc = player.location();
+                let message = format!(
+                    "Position: {} (region {}, {})",
+                    loc,
+                    loc.region_x(),
+                    loc.region_y()
+                );
+                Ok(PacketResult::with_responses(vec![build_system_message(
+                    &message,
+                )]))
+            }
+            "tele" | "teleport" => {
+                if args.len() >= 2 {
+                    if let (Ok(x), Ok(y)) = (args[0].parse::<u16>(), args[1].parse::<u16>()) {
+                        let z = args.get(2).and_then(|s| s.parse::<u8>().ok()).unwrap_or(0);
+                        let dest = Location::new(x, y, z);
+                        player.teleport(dest);
+
+                        let message = format!("Teleported to {}", dest);
+                        return Ok(PacketResult::with_responses(vec![
+                            build_system_message(&message),
+                            build_map_region(dest),
+                        ]));
+                    }
+                }
+                Ok(PacketResult::with_responses(vec![build_system_message(
+                    "Usage: ::tele x y [z]",
+                )]))
+            }
+            "setlevel" => {
+                if args.len() >= 2 {
+                    if let (Ok(skill_id), Ok(level)) =
+                        (args[0].parse::<u8>(), args[1].parse::<u8>())
+                    {
+                        if skill_id < 25 && level >= 1 && level <= 99 {
+                            let mut skills = player.skills.write();
+                            skills.levels[skill_id as usize] = level;
+                            drop(skills);
+
+                            let message = format!("Set skill {} to level {}", skill_id, level);
+                            return Ok(PacketResult::with_responses(vec![
+                                build_system_message(&message),
+                                build_skill_update(skill_id, level, 0),
+                            ]));
+                        }
+                    }
+                }
+                Ok(PacketResult::with_responses(vec![build_system_message(
+                    "Usage: ::setlevel skill_id level",
+                )]))
+            }
+            "energy" => {
+                let energy = args
+                    .first()
+                    .and_then(|s| s.parse::<u8>().ok())
+                    .unwrap_or(100);
+                *player.run_energy.write() = energy.min(100);
+                Ok(PacketResult::with_responses(vec![
+                    build_system_message(&format!("Run energy set to {}", energy)),
+                    build_run_energy(energy),
+                ]))
+            }
+            "help" | "commands" => {
+                let messages = vec![
+                    "Available commands:",
+                    "::pos - Show current position",
+                    "::tele x y [z] - Teleport to coordinates",
+                    "::setlevel skill_id level - Set skill level",
+                    "::energy [amount] - Set run energy",
+                ];
+                let responses: Vec<_> = messages.iter().map(|m| build_system_message(m)).collect();
+                Ok(PacketResult::with_responses(responses))
+            }
+            _ => Ok(PacketResult::with_responses(vec![build_system_message(
+                &format!("Unknown command: {}", cmd),
+            )])),
+        }
+    }
+
+    /// Handle keep-alive packet
+    fn handle_keepalive(&self, _packet: &IncomingGamePacket) -> Result<PacketResult> {
         trace!("Keep-alive received");
-        Ok(None)
+        Ok(PacketResult::empty())
     }
 
     /// Handle window focus change
-    fn handle_focus_change(
-        &self,
-        packet: &IncomingGamePacket,
-    ) -> Result<Option<Vec<OutgoingGamePacket>>> {
+    fn handle_focus_change(&self, packet: &IncomingGamePacket) -> Result<PacketResult> {
         let mut buffer = packet.buffer();
         let focused = buffer.read_ubyte() == 1;
         trace!(focused = focused, "Focus change");
-        Ok(None)
+        Ok(PacketResult::empty())
     }
 
     /// Handle chat message
-    fn handle_chat(&self, packet: &IncomingGamePacket) -> Result<Option<Vec<OutgoingGamePacket>>> {
+    fn handle_chat(&self, packet: &IncomingGamePacket) -> Result<PacketResult> {
         let mut buffer = packet.buffer();
 
         // Chat format: effects (2 bytes), message (huffman encoded)
         if buffer.remaining() < 2 {
-            return Ok(None);
+            return Ok(PacketResult::empty());
         }
 
         let _effects = buffer.read_ushort();
@@ -292,96 +510,108 @@ impl GamePacketHandler {
         // TODO: Decode huffman-encoded message
         debug!(message_len = message_data.len(), "Chat message received");
 
-        Ok(None)
+        // For now, just acknowledge receipt
+        Ok(PacketResult::empty())
     }
 
     /// Handle walk/movement
-    fn handle_walk(&self, packet: &IncomingGamePacket) -> Result<Option<Vec<OutgoingGamePacket>>> {
+    fn handle_walk(&self, packet: &IncomingGamePacket) -> Result<PacketResult> {
         let mut buffer = packet.buffer();
 
         if buffer.remaining() < 5 {
-            return Ok(None);
+            return Ok(PacketResult::empty());
         }
 
         // Read base coordinates
-        let _first_step_x = buffer.read_short_le();
-        let _first_step_y = buffer.read_short_a();
-        let _running = buffer.read_byte_s() == 1;
+        // The format varies slightly between opcode 14 and 98
+        let first_step_x: u16;
+        let first_step_y: u16;
+        let running: bool;
+
+        if packet.opcode == 14 {
+            // Walk to position (click on minimap)
+            first_step_x = buffer.read_ushort_le();
+            first_step_y = buffer.read_short_a();
+            running = buffer.read_byte_s() == 1;
+        } else {
+            // Walk here (click on game screen) - opcode 98
+            first_step_x = buffer.read_ushort_le();
+            first_step_y = buffer.read_short_a();
+            running = buffer.read_byte_s() == 1;
+        }
 
         // Read additional waypoints if present
-        let _num_waypoints = (buffer.remaining() / 2) as usize;
+        let mut waypoints = Vec::new();
+        while buffer.remaining() >= 2 {
+            let dx = buffer.read_byte() as i8;
+            let dy = buffer.read_byte() as i8;
+            waypoints.push((dx, dy));
+        }
 
-        trace!("Walk request");
+        debug!(
+            dest_x = first_step_x,
+            dest_y = first_step_y,
+            running = running,
+            waypoints = waypoints.len(),
+            "Walk request received"
+        );
 
-        Ok(None)
+        Ok(PacketResult::with_movement(MovementRequest {
+            dest_x: first_step_x,
+            dest_y: first_step_y,
+            running,
+            waypoints,
+        }))
     }
 
     /// Handle command (::command)
-    fn handle_command(
-        &self,
-        packet: &IncomingGamePacket,
-    ) -> Result<Option<Vec<OutgoingGamePacket>>> {
+    fn handle_command(&self, packet: &IncomingGamePacket) -> Result<PacketResult> {
         let mut buffer = packet.buffer();
         let command = buffer.read_string();
 
         debug!(command = %command, "Command received");
 
-        // TODO: Process commands
-        // Common commands: pos, tele, item, npc, object, etc.
-
-        Ok(None)
+        Ok(PacketResult::with_command(command))
     }
 
     /// Handle map region loaded confirmation
-    fn handle_map_loaded(
-        &self,
-        _packet: &IncomingGamePacket,
-    ) -> Result<Option<Vec<OutgoingGamePacket>>> {
+    fn handle_map_loaded(&self, _packet: &IncomingGamePacket) -> Result<PacketResult> {
         trace!("Map region loaded");
-        Ok(None)
+        Ok(PacketResult::empty())
     }
 
     /// Handle mouse click
-    fn handle_mouse_click(
-        &self,
-        packet: &IncomingGamePacket,
-    ) -> Result<Option<Vec<OutgoingGamePacket>>> {
+    fn handle_mouse_click(&self, packet: &IncomingGamePacket) -> Result<PacketResult> {
         let mut buffer = packet.buffer();
 
         if buffer.remaining() < 4 {
-            return Ok(None);
+            return Ok(PacketResult::empty());
         }
 
         let _packed_data = buffer.read_int();
         // Contains: time since last click, right-click flag, x, y
 
-        Ok(None)
+        Ok(PacketResult::empty())
     }
 
     /// Handle button click
-    fn handle_button_click(
-        &self,
-        packet: &IncomingGamePacket,
-    ) -> Result<Option<Vec<OutgoingGamePacket>>> {
+    fn handle_button_click(&self, packet: &IncomingGamePacket) -> Result<PacketResult> {
         let mut buffer = packet.buffer();
 
         if buffer.remaining() < 2 {
-            return Ok(None);
+            return Ok(PacketResult::empty());
         }
 
         let button_id = buffer.read_ushort();
         debug!(button_id = button_id, "Button click");
 
-        Ok(None)
+        Ok(PacketResult::empty())
     }
 
     /// Handle close interface
-    fn handle_close_interface(
-        &self,
-        _packet: &IncomingGamePacket,
-    ) -> Result<Option<Vec<OutgoingGamePacket>>> {
+    fn handle_close_interface(&self, _packet: &IncomingGamePacket) -> Result<PacketResult> {
         trace!("Close interface");
-        Ok(None)
+        Ok(PacketResult::empty())
     }
 }
 
@@ -404,6 +634,54 @@ pub fn build_system_message(message: &str) -> OutgoingGamePacket {
 /// Build a logout packet
 pub fn build_logout() -> OutgoingGamePacket {
     OutgoingGamePacket::fixed(OutgoingOpcode::Logout.as_u8(), vec![])
+}
+
+/// Build a map region packet
+pub fn build_map_region(location: Location) -> OutgoingGamePacket {
+    let mut buffer = PacketBuffer::with_capacity(4);
+    // Send region coordinates (location / 8)
+    let region_x = (location.x >> 3) as u16;
+    let region_y = (location.y >> 3) as u16;
+    buffer.write_ushort(region_x);
+    buffer.write_ushort(region_y);
+    OutgoingGamePacket::fixed(
+        OutgoingOpcode::MapRegion.as_u8(),
+        buffer.as_bytes().to_vec(),
+    )
+}
+
+/// Build a skill update packet
+pub fn build_skill_update(skill_id: u8, level: u8, xp: i32) -> OutgoingGamePacket {
+    let mut buffer = PacketBuffer::with_capacity(7);
+    buffer.write_ubyte(skill_id);
+    buffer.write_ubyte(level);
+    buffer.write_int(xp);
+    OutgoingGamePacket::fixed(
+        OutgoingOpcode::SkillUpdate.as_u8(),
+        buffer.as_bytes().to_vec(),
+    )
+}
+
+/// Build a run energy update packet
+pub fn build_run_energy(energy: u8) -> OutgoingGamePacket {
+    let mut buffer = PacketBuffer::with_capacity(1);
+    buffer.write_ubyte(energy);
+    OutgoingGamePacket::fixed(
+        OutgoingOpcode::RunEnergy.as_u8(),
+        buffer.as_bytes().to_vec(),
+    )
+}
+
+/// Build a player option packet (right-click menu)
+pub fn build_player_option(slot: u8, text: &str, priority: bool) -> OutgoingGamePacket {
+    let mut buffer = PacketBuffer::with_capacity(text.len() + 4);
+    buffer.write_ubyte(slot);
+    buffer.write_string(text);
+    buffer.write_ubyte(if priority { 1 } else { 0 });
+    OutgoingGamePacket::variable(
+        OutgoingOpcode::PlayerOption.as_u8(),
+        buffer.as_bytes().to_vec(),
+    )
 }
 
 #[cfg(test)]
@@ -471,6 +749,28 @@ mod tests {
     }
 
     #[test]
+    fn test_build_map_region() {
+        let loc = Location::new(3222, 3222, 0);
+        let packet = build_map_region(loc);
+        assert!(!packet.variable_length);
+        assert_eq!(packet.data.len(), 4);
+    }
+
+    #[test]
+    fn test_build_skill_update() {
+        let packet = build_skill_update(0, 99, 13034431);
+        assert!(!packet.variable_length);
+        assert_eq!(packet.data.len(), 6); // 1 + 1 + 4
+    }
+
+    #[test]
+    fn test_build_run_energy() {
+        let packet = build_run_energy(75);
+        assert!(!packet.variable_length);
+        assert_eq!(packet.data.len(), 1);
+    }
+
+    #[test]
     fn test_process_keepalive() {
         let handler = GamePacketHandler::new();
         let packet = IncomingGamePacket::new(0, vec![]);
@@ -486,5 +786,46 @@ mod tests {
 
         let result = handler.process(&packet);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_process_walk() {
+        let handler = GamePacketHandler::new();
+        // Create a minimal walk packet: x (2 bytes), y (2 bytes), running (1 byte)
+        let mut buffer = PacketBuffer::with_capacity(5);
+        buffer.write_ushort_le(3222);
+        buffer.write_short_a(3218);
+        buffer.write_byte_s(0);
+
+        let packet = IncomingGamePacket::new(14, buffer.as_bytes().to_vec());
+        let result = handler.process(&packet).unwrap();
+
+        assert!(result.movement.is_some());
+        let movement = result.movement.unwrap();
+        assert_eq!(movement.dest_x, 3222);
+        assert_eq!(movement.dest_y, 3218);
+        assert!(!movement.running);
+    }
+
+    #[test]
+    fn test_packet_result_empty() {
+        let result = PacketResult::empty();
+        assert!(result.responses.is_empty());
+        assert!(result.movement.is_none());
+        assert!(result.chat_message.is_none());
+        assert!(result.command.is_none());
+    }
+
+    #[test]
+    fn test_packet_result_with_movement() {
+        let movement = MovementRequest {
+            dest_x: 100,
+            dest_y: 200,
+            running: true,
+            waypoints: vec![],
+        };
+        let result = PacketResult::with_movement(movement);
+        assert!(result.movement.is_some());
+        assert_eq!(result.movement.as_ref().unwrap().dest_x, 100);
     }
 }

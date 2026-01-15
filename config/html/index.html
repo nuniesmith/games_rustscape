@@ -1,209 +1,202 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Rustscape - Game Server</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Rustscape - Choose Client</title>
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            color: #e4e4e4;
-        }
+            body {
+                font-family:
+                    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                    Oxygen, Ubuntu, Cantarell, sans-serif;
+                background: linear-gradient(
+                    180deg,
+                    #1a140e 0%,
+                    #2b2117 50%,
+                    #1a140e 100%
+                );
+                min-height: 100vh;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                color: #cccccc;
+            }
 
-        .container {
-            max-width: 600px;
-            padding: 40px;
-            text-align: center;
-        }
+            h1 {
+                font-size: 48px;
+                color: #d4a84b;
+                letter-spacing: 4px;
+                margin-bottom: 8px;
+                text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+            }
 
-        .logo {
-            font-size: 3rem;
-            font-weight: bold;
-            margin-bottom: 20px;
-            background: linear-gradient(90deg, #e94560, #ff6b6b);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
+            .subtitle {
+                color: #999;
+                margin-bottom: 40px;
+                letter-spacing: 2px;
+            }
 
-        .logo .rust {
-            color: #e94560;
-        }
+            .clients {
+                display: flex;
+                gap: 24px;
+                flex-wrap: wrap;
+                justify-content: center;
+                margin-bottom: 40px;
+            }
 
-        .logo .scape {
-            color: #ff6b6b;
-        }
+            .client-card {
+                background: rgba(43, 33, 23, 0.9);
+                border: 2px solid #5c4a36;
+                border-radius: 8px;
+                padding: 32px;
+                width: 280px;
+                text-align: center;
+                text-decoration: none;
+                color: inherit;
+                transition: all 0.3s ease;
+            }
 
-        .subtitle {
-            font-size: 1.2rem;
-            color: #8a8a9a;
-            margin-bottom: 40px;
-        }
+            .client-card:hover {
+                border-color: #d4a84b;
+                transform: translateY(-4px);
+                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+            }
 
-        .card {
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 16px;
-            padding: 30px;
-            margin-bottom: 30px;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
+            .client-card h2 {
+                color: #d4a84b;
+                margin-bottom: 12px;
+                font-size: 20px;
+            }
 
-        .card h2 {
-            font-size: 1.4rem;
-            margin-bottom: 15px;
-            color: #fff;
-        }
+            .client-card p {
+                font-size: 14px;
+                line-height: 1.6;
+                margin-bottom: 16px;
+                color: #b8b8c8;
+            }
 
-        .card p {
-            line-height: 1.6;
-            color: #b8b8c8;
-            margin-bottom: 20px;
-        }
+            .client-card .tech {
+                font-size: 12px;
+                color: #888;
+                padding: 4px 12px;
+                background: rgba(0, 0, 0, 0.3);
+                border-radius: 4px;
+                display: inline-block;
+            }
 
-        .launch-button {
-            display: inline-block;
-            background: linear-gradient(90deg, #e94560, #ff6b6b);
-            color: white;
-            text-decoration: none;
-            padding: 15px 40px;
-            border-radius: 50px;
-            font-size: 1.1rem;
-            font-weight: 600;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 15px rgba(233, 69, 96, 0.3);
-        }
+            .recommended {
+                border-color: #d4a84b;
+                position: relative;
+            }
 
-        .launch-button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 25px rgba(233, 69, 96, 0.4);
-        }
+            .recommended::before {
+                content: "RECOMMENDED";
+                position: absolute;
+                top: -10px;
+                left: 50%;
+                transform: translateX(-50%);
+                font-size: 10px;
+                letter-spacing: 2px;
+                color: #1a140e;
+                background: #d4a84b;
+                padding: 2px 12px;
+                border-radius: 4px;
+            }
 
-        .features {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 20px;
-            margin-top: 30px;
-        }
+            .info-section {
+                background: rgba(43, 33, 23, 0.6);
+                border: 1px solid #5c4a36;
+                border-radius: 8px;
+                padding: 24px 32px;
+                max-width: 600px;
+                text-align: center;
+            }
 
-        .feature {
-            text-align: center;
-        }
+            .info-section h3 {
+                color: #d4a84b;
+                margin-bottom: 12px;
+                font-size: 16px;
+            }
 
-        .feature-icon {
-            font-size: 2rem;
-            margin-bottom: 10px;
-        }
+            .info-section p {
+                font-size: 14px;
+                line-height: 1.6;
+                color: #999;
+            }
 
-        .feature h3 {
-            font-size: 0.9rem;
-            color: #fff;
-            margin-bottom: 5px;
-        }
+            .tech-stack {
+                display: flex;
+                justify-content: center;
+                gap: 12px;
+                margin-top: 16px;
+                flex-wrap: wrap;
+            }
 
-        .feature p {
-            font-size: 0.8rem;
-            color: #8a8a9a;
-        }
+            .tech-badge {
+                background: rgba(212, 168, 75, 0.15);
+                border: 1px solid rgba(212, 168, 75, 0.3);
+                padding: 6px 14px;
+                border-radius: 20px;
+                font-size: 12px;
+                color: #d4a84b;
+            }
 
-        .tech-stack {
-            display: flex;
-            justify-content: center;
-            gap: 20px;
-            margin-top: 20px;
-            flex-wrap: wrap;
-        }
+            footer {
+                margin-top: 40px;
+                color: #666;
+                font-size: 12px;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>RUSTSCAPE</h1>
+        <p class="subtitle">A RuneScape-Inspired Adventure</p>
 
-        .tech-badge {
-            background: rgba(255, 255, 255, 0.08);
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-size: 0.85rem;
-            color: #b8b8c8;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
+        <div class="clients">
+            <a href="/web-client/" class="client-card recommended">
+                <h2>Web Client</h2>
+                <p>
+                    TypeScript client with PixiJS rendering. Lightweight, fast,
+                    and works in any modern browser.
+                </p>
+                <span class="tech">TypeScript + PixiJS</span>
+            </a>
 
-        footer {
-            margin-top: 40px;
-            color: #666;
-            font-size: 0.85rem;
-        }
+            <a href="/kmp/" class="client-card">
+                <h2>KMP Client</h2>
+                <p>
+                    Kotlin Multiplatform client with Compose UI. Cross-platform
+                    ready with native feel.
+                </p>
+                <span class="tech">Kotlin + Compose WASM</span>
+            </a>
+        </div>
 
-        footer a {
-            color: #e94560;
-            text-decoration: none;
-        }
-
-        footer a:hover {
-            text-decoration: underline;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1 class="logo">Rustscape</h1>
-        <p class="subtitle">A modern MMORPG game server written in Rust</p>
-
-        <div class="card">
-            <h2>Welcome to Rustscape</h2>
+        <div class="info-section">
+            <h3>Technology Stack</h3>
             <p>
-                Rustscape is a high-performance game server implementing classic MMORPG mechanics.
-                Built with Rust for speed, safety, and reliability.
+                Rustscape is a high-performance MMORPG game server built with
+                modern technologies.
             </p>
-            <a href="/web-client/" class="launch-button">Launch Web Client</a>
-        </div>
-
-        <div class="card">
-            <h2>Features</h2>
-            <div class="features">
-                <div class="feature">
-                    <div class="feature-icon">⚡</div>
-                    <h3>High Performance</h3>
-                    <p>Built with Rust for maximum speed</p>
-                </div>
-                <div class="feature">
-                    <div class="feature-icon">🌐</div>
-                    <h3>Web Client</h3>
-                    <p>Play directly in your browser</p>
-                </div>
-                <div class="feature">
-                    <div class="feature-icon">🔒</div>
-                    <h3>Secure</h3>
-                    <p>Modern authentication system</p>
-                </div>
-            </div>
-        </div>
-
-        <div class="card">
-            <h2>Technology Stack</h2>
             <div class="tech-stack">
                 <span class="tech-badge">Rust</span>
                 <span class="tech-badge">TypeScript</span>
+                <span class="tech-badge">Kotlin</span>
                 <span class="tech-badge">PostgreSQL</span>
                 <span class="tech-badge">Redis</span>
                 <span class="tech-badge">WebSocket</span>
-                <span class="tech-badge">PixiJS</span>
             </div>
         </div>
 
         <footer>
-            <p>Rustscape &copy; <span id="year">2025</span> | Open Source Project</p>
+            <p>Rustscape &copy; 2025 | Revision 530</p>
         </footer>
-    </div>
-
-    <script>
-        document.getElementById('year').textContent = new Date().getFullYear();
-    </script>
-</body>
+    </body>
 </html>

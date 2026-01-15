@@ -727,6 +727,8 @@ impl ConnectionHandler {
                     ) {
                         Ok(player) => {
                             self.state.world.increment_player_count();
+                            // Register for player sync
+                            self.state.world.register_player_sync(player.index);
                             info!(
                                 session_id = session_id,
                                 username = %username,
@@ -743,15 +745,19 @@ impl ConnectionHandler {
                                 "Failed to register player, using memory-only mode"
                             );
                             // Fall back to memory-only player
-                            if let Err(e2) = self
+                            match self
                                 .state
                                 .world
                                 .players
                                 .register(session_id, username.clone())
                             {
-                                warn!(error = %e2, "Fallback registration also failed");
-                            } else {
-                                self.state.world.increment_player_count();
+                                Ok(player) => {
+                                    self.state.world.increment_player_count();
+                                    self.state.world.register_player_sync(player.index);
+                                }
+                                Err(e2) => {
+                                    warn!(error = %e2, "Fallback registration also failed");
+                                }
                             }
                         }
                     }
@@ -764,15 +770,19 @@ impl ConnectionHandler {
                         "Failed to load player data, using memory-only mode"
                     );
                     // Fall back to memory-only player
-                    if let Err(e2) = self
+                    match self
                         .state
                         .world
                         .players
                         .register(session_id, username.clone())
                     {
-                        warn!(error = %e2, "Fallback registration also failed");
-                    } else {
-                        self.state.world.increment_player_count();
+                        Ok(player) => {
+                            self.state.world.increment_player_count();
+                            self.state.world.register_player_sync(player.index);
+                        }
+                        Err(e2) => {
+                            warn!(error = %e2, "Fallback registration also failed");
+                        }
                     }
                 }
             }
@@ -786,6 +796,8 @@ impl ConnectionHandler {
             {
                 Ok(player) => {
                     self.state.world.increment_player_count();
+                    // Register for player sync
+                    self.state.world.register_player_sync(player.index);
                     debug!(
                         session_id = session_id,
                         username = %username,
@@ -1014,19 +1026,32 @@ impl ConnectionHandler {
         let packet = IncomingGamePacket::new(opcode, data);
         let handler = GamePacketHandler::new();
 
-        match handler.process(&packet) {
-            Ok(Some(responses)) => {
-                // Send any response packets
-                for response in responses {
-                    let encoded = session
-                        .with_isaac(|isaac| response.encode(isaac))
-                        .unwrap_or_else(|| response.encode_raw());
-                    transport.write(&encoded).await?;
-                }
-                transport.flush().await?;
+        // Try to get the player for this session to process with player context
+        let result = if let Some(player_index) = session.player_index() {
+            if let Some(player) = self.state.world.players.get(player_index) {
+                // Process with player context for movement, commands, etc.
+                handler.process_with_player(&packet, &player)
+            } else {
+                // Player not found, process without context
+                handler.process(&packet)
             }
-            Ok(None) => {
-                // No response needed
+        } else {
+            // No player index set, process without context
+            handler.process(&packet)
+        };
+
+        match result {
+            Ok(packet_result) => {
+                // Send any response packets
+                if !packet_result.responses.is_empty() {
+                    for response in packet_result.responses {
+                        let encoded = session
+                            .with_isaac(|isaac| response.encode(isaac))
+                            .unwrap_or_else(|| response.encode_raw());
+                        transport.write(&encoded).await?;
+                    }
+                    transport.flush().await?;
+                }
             }
             Err(e) => {
                 warn!(
@@ -1119,6 +1144,9 @@ impl ConnectionHandler {
                     }
                 }
 
+                // Unregister player from sync system
+                self.state.world.unregister_player_sync(player.index);
+
                 // Unregister player from game world
                 self.state.world.players.unregister(player.index);
                 self.state.world.decrement_player_count();
@@ -1127,7 +1155,7 @@ impl ConnectionHandler {
                     session_id = session_id,
                     username = %username,
                     player_index = player.index,
-                    "Player unregistered from game world"
+                    "Player unregistered from game world and sync"
                 );
             }
         }

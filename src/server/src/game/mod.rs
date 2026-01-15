@@ -6,7 +6,9 @@
 //! - Entity systems (NPCs, objects, ground items)
 //! - Region/map management
 //! - Combat and skills (future)
+//! - Player synchronization (multiplayer updates)
 
 pub mod persistence;
 pub mod player;
+pub mod sync;
 pub mod world;

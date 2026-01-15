@@ -12,6 +12,12 @@ import { ByteBuffer } from "./protocol/ByteBuffer";
 import { IsaacPair } from "./protocol/Isaac";
 import { AuthService } from "./auth/AuthService";
 import { GameRenderer } from "./renderer/GameRenderer";
+import {
+    gameState,
+    MessageType,
+    PlayerRights,
+    SKILL_NAMES as GAME_SKILL_NAMES,
+} from "./game";
 
 // Configuration
 const CONFIG = {
@@ -44,34 +50,8 @@ let loginState:
 let pendingUsername = "";
 let pendingPassword = "";
 
-// Skill names for display
-const SKILL_NAMES = [
-    "Attack",
-    "Defence",
-    "Strength",
-    "Hitpoints",
-    "Ranged",
-    "Prayer",
-    "Magic",
-    "Cooking",
-    "Woodcutting",
-    "Fletching",
-    "Fishing",
-    "Firemaking",
-    "Crafting",
-    "Smithing",
-    "Mining",
-    "Herblore",
-    "Agility",
-    "Thieving",
-    "Slayer",
-    "Farming",
-    "Runecrafting",
-    "Hunter",
-    "Construction",
-    "Summoning",
-    "Dungeoneering",
-];
+// Skill names for display (use from game module)
+const SKILL_NAMES = GAME_SKILL_NAMES;
 
 // UI Elements
 const authContainer = document.getElementById("auth-container");
@@ -771,6 +751,20 @@ function handleLoginResponse(buffer: ByteBuffer): void {
         console.log(`  - Player Index: ${playerIndex}`);
         console.log(`  - Member: ${member}`);
 
+        // Update game state with player info
+        const playerRights =
+            rights === 2
+                ? PlayerRights.ADMINISTRATOR
+                : rights === 1
+                  ? PlayerRights.MODERATOR
+                  : PlayerRights.PLAYER;
+        gameState.setPlayerInfo(
+            pendingUsername,
+            playerIndex,
+            playerRights,
+            member === 1,
+        );
+
         // Update game renderer state
         if (gameRenderer) {
             gameRenderer.setPlayerInfo(pendingUsername, rights, member === 1);
@@ -870,6 +864,10 @@ function handleGamePacket(buffer: ByteBuffer): void {
                     (packetData[5] << 8) |
                     packetData[6];
 
+                // Update game state
+                gameState.updateSkill(skillId, level, xp);
+
+                // Update renderer
                 if (gameRenderer) {
                     gameRenderer.updateSkill(skillId, level, xp);
                 }
@@ -890,6 +888,10 @@ function handleGamePacket(buffer: ByteBuffer): void {
                     ),
                 );
                 if (text && text.trim().length > 0) {
+                    // Update game state
+                    gameState.addTextMessage(text, MessageType.GAME);
+
+                    // Update renderer
                     if (gameRenderer) {
                         gameRenderer.addMessage(text);
                     }
@@ -900,16 +902,22 @@ function handleGamePacket(buffer: ByteBuffer): void {
 
         case 0x68: // Player option (104)
             if (packetData.length > 2) {
-                const optionBytes = packetData.slice(2);
+                const slot = packetData[1];
+                const priority = packetData[packetData.length - 1] === 1;
+                const optionBytes = packetData.slice(2, packetData.length - 1);
                 const nullIndex = optionBytes.indexOf(0);
                 const optionText = new TextDecoder().decode(
                     optionBytes.slice(
                         0,
-                        nullIndex > 0 ? nullIndex : optionBytes.length - 2,
+                        nullIndex > 0 ? nullIndex : optionBytes.length,
                     ),
                 );
                 if (optionText) {
-                    console.log(`Player option added: "${optionText}"`);
+                    // Update game state
+                    gameState.setPlayerOption(slot, optionText, priority);
+                    console.log(
+                        `Player option added: slot=${slot}, text="${optionText}", priority=${priority}`,
+                    );
                 }
             }
             break;
@@ -918,6 +926,11 @@ function handleGamePacket(buffer: ByteBuffer): void {
             if (packetData.length >= 5) {
                 const regionX = (packetData[1] << 8) | packetData[2];
                 const regionY = (packetData[3] << 8) | packetData[4];
+
+                // Update game state
+                gameState.setMapRegion(regionX, regionY);
+
+                // Update renderer
                 if (gameRenderer) {
                     gameRenderer.setMapRegion(regionX, regionY);
                 }
@@ -925,8 +938,25 @@ function handleGamePacket(buffer: ByteBuffer): void {
             }
             break;
 
+        case 0x6e: // Run energy (110)
+            if (packetData.length >= 2) {
+                const energy = packetData[1];
+                gameState.setRunEnergy(energy);
+                console.log(`Run energy: ${energy}`);
+            }
+            break;
+
+        case 0xae: // Weight (174)
+            if (packetData.length >= 3) {
+                const weight = (packetData[1] << 8) | packetData[2];
+                gameState.setWeight(weight);
+                console.log(`Weight: ${weight}`);
+            }
+            break;
+
         case ServerOpcode.LOGOUT: // Logout (86)
             log("Server requested logout", "info");
+            gameState.reset();
             logout();
             break;
 

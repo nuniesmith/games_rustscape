@@ -1,6 +1,6 @@
-pub mod location;
-pub mod map;
-pub mod entity;
-pub mod scene;
-pub mod item;
+//! World module
+//!
+//! Contains world-related types like locations and entities.
 
+pub mod entity;
+pub mod location;

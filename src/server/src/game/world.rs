@@ -6,7 +6,9 @@
 //! - Region management
 //! - World events and broadcasts
 //! - Periodic autosave of player data
+//! - Player synchronization (multiplayer updates)
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use std::time::{Duration, Instant};
@@ -14,11 +16,13 @@ use std::time::{Duration, Instant};
 use parking_lot::RwLock;
 use tokio::sync::broadcast;
 use tokio::time::{interval, MissedTickBehavior};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, trace};
 
 use crate::error::Result;
 use crate::game::persistence::PlayerPersistence;
 use crate::game::player::PlayerManager;
+use crate::game::sync::PlayerSyncManager;
+use crate::net::session::SessionManager;
 use uuid::Uuid;
 
 /// Standard game tick rate in milliseconds
@@ -142,6 +146,8 @@ pub struct GameWorld {
     player_count: AtomicU64,
     /// Player manager
     pub players: PlayerManager,
+    /// Player synchronization manager
+    pub sync: PlayerSyncManager,
     /// Ticks since last autosave
     ticks_since_autosave: AtomicU64,
 }
@@ -172,6 +178,7 @@ impl GameWorld {
             update_countdown: AtomicU64::new(0),
             player_count: AtomicU64::new(0),
             players: PlayerManager::new(max_players),
+            sync: PlayerSyncManager::new(),
             ticks_since_autosave: AtomicU64::new(0),
         })
     }
@@ -240,9 +247,9 @@ impl GameWorld {
         info!("Update countdown cancelled");
     }
 
-    /// Run the game world tick loop (without persistence)
+    /// Run the game world tick loop (without persistence or sync)
     pub async fn run(&self, shutdown_rx: &mut broadcast::Receiver<()>) {
-        self.run_with_persistence(shutdown_rx, None).await
+        self.run_full(shutdown_rx, None, None).await
     }
 
     /// Run the game world tick loop with optional persistence for autosave
@@ -250,6 +257,27 @@ impl GameWorld {
         &self,
         shutdown_rx: &mut broadcast::Receiver<()>,
         persistence: Option<&PlayerPersistence>,
+    ) {
+        self.run_full(shutdown_rx, persistence, None).await
+    }
+
+    /// Run the game world tick loop with persistence and session manager for sync
+    pub async fn run_with_sync(
+        &self,
+        shutdown_rx: &mut broadcast::Receiver<()>,
+        persistence: Option<&PlayerPersistence>,
+        session_manager: Option<&SessionManager>,
+    ) {
+        self.run_full(shutdown_rx, persistence, session_manager)
+            .await
+    }
+
+    /// Run the full game world tick loop with all optional features
+    async fn run_full(
+        &self,
+        shutdown_rx: &mut broadcast::Receiver<()>,
+        persistence: Option<&PlayerPersistence>,
+        session_manager: Option<&SessionManager>,
     ) {
         info!(
             world_id = self.settings.world_id,
@@ -278,6 +306,11 @@ impl GameWorld {
                     // Process game tick with persistence for autosave
                     if let Err(e) = self.process_tick(persistence).await {
                         error!(error = %e, "Error processing game tick");
+                    }
+
+                    // Send player sync packets if session manager is available
+                    if let Some(sessions) = session_manager {
+                        self.send_sync_packets(sessions).await;
                     }
 
                     // Check update countdown
@@ -335,7 +368,7 @@ impl GameWorld {
         // 3. Process NPC actions
         // 4. Process timers and events
         // 5. Update entity positions
-        // 6. Send outgoing packets
+        // 6. Build and prepare sync packets (actual sending done by caller)
 
         // Check if autosave is due
         if self.settings.autosave_interval > 0 {
@@ -349,6 +382,70 @@ impl GameWorld {
         }
 
         Ok(())
+    }
+
+    /// Process player synchronization and return packets to send
+    ///
+    /// This builds player update packets for all connected players.
+    /// Returns a map of player_index -> encoded packet data.
+    pub fn process_sync(&self) -> HashMap<u16, Vec<u8>> {
+        self.sync.process_tick(&self.players)
+    }
+
+    /// Send player update packets to all sessions
+    ///
+    /// This should be called after process_tick() each game tick.
+    pub async fn send_sync_packets(&self, session_manager: &SessionManager) {
+        let packets = self.process_sync();
+
+        if packets.is_empty() {
+            return;
+        }
+
+        trace!(player_count = packets.len(), "Sending player sync packets");
+
+        for (player_index, packet_data) in packets {
+            // Find the session for this player
+            if let Some(player) = self.players.get(player_index) {
+                if let Some(session) = session_manager.get_by_username(&player.username) {
+                    if let Err(e) = session.try_send(packet_data) {
+                        trace!(
+                            player_index = player_index,
+                            error = %e,
+                            "Failed to send sync packet"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Register a player for synchronization
+    ///
+    /// Should be called when a player finishes login and enters the game world.
+    pub fn register_player_sync(&self, player_index: u16) {
+        if let Some(player) = self.players.get(player_index) {
+            self.sync.register(&player);
+            debug!(player_index = player_index, "Player registered for sync");
+        }
+    }
+
+    /// Unregister a player from synchronization
+    ///
+    /// Should be called when a player disconnects or logs out.
+    pub fn unregister_player_sync(&self, player_index: u16) {
+        self.sync.unregister(player_index);
+        debug!(player_index = player_index, "Player unregistered from sync");
+    }
+
+    /// Flag a player's appearance as changed (will be sent in next sync)
+    pub fn flag_appearance_update(&self, player_index: u16) {
+        self.sync.flag_appearance_update(player_index);
+    }
+
+    /// Set a player as teleported (will update position in next sync)
+    pub fn flag_teleport(&self, player_index: u16) {
+        self.sync.set_teleported(player_index);
     }
 
     /// Autosave all online players
