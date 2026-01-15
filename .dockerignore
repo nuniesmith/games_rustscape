@@ -98,6 +98,16 @@ temp/
 *.7z
 
 # ============================================================================
+# GAME CACHE
+# ============================================================================
+# Include cache split parts and index files for sprite extraction
+# Exclude the assembled dat2 file (it's assembled during build)
+cache/main_file_cache.dat2
+!cache/main_file_cache.dat2.part_*
+!cache/main_file_cache.idx*
+!cache/assemble.sh
+
+# ============================================================================
 # ENVIRONMENT & SECRETS
 # ============================================================================
 .env

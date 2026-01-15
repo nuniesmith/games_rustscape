@@ -1,9 +1,11 @@
 import { defineConfig } from "vite";
 import { resolve } from "path";
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
     root: ".",
-    base: "/",
+    // Use /web-client/ base path for production builds (Docker/nginx)
+    // Use / for development server
+    base: command === "build" ? "/web-client/" : "/",
     publicDir: "assets",
 
     resolve: {
@@ -60,4 +62,4 @@ export default defineConfig({
     optimizeDeps: {
         include: ["pako"],
     },
-});
+}));

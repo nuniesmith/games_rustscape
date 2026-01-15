@@ -89,6 +89,7 @@ services:
         volumes:
             - "rustscape_cache:/usr/share/nginx/html/assets/cache:ro"
             - "rustscape_sprites:/usr/share/nginx/html/sprites:ro"
+            - "./config/ssl:/etc/nginx/ssl:ro"
         environment:
             GAME_SERVER_HOST: server
             GAME_SERVER_WS_PORT: 43596

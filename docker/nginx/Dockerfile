@@ -1,6 +1,6 @@
 # ============================================
 # Rustscape Nginx Dockerfile
-# Builds both TypeScript and KMP web clients
+# Builds web clients and extracts game sprites
 # ============================================
 
 # Stage 1: Build the TypeScript web client with Vite
@@ -61,7 +61,60 @@ RUN ./gradlew :composeApp:wasmJsBrowserDistribution \
 # List built files for debugging
 RUN ls -la composeApp/build/dist/wasmJs/productionExecutable/ 2>/dev/null || echo "KMP build output not found"
 
-# Stage 3: Nginx with built assets
+# Stage 3: Build sprite extractor and extract sprites from cache
+FROM rust:latest AS sprite-extractor
+
+WORKDIR /build
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy server source for building the extractor
+COPY ./src/server/Cargo.toml ./src/server/Cargo.lock* ./
+
+# Create dummy source to cache dependencies
+RUN mkdir -p src/bin && \
+    echo "fn main() {}" > src/main.rs && \
+    echo "" > src/lib.rs && \
+    echo "fn main() {}" > src/bin/extract-sprites.rs && \
+    cargo build --release --bin extract-sprites 2>/dev/null || true
+
+# Copy actual source
+COPY ./src/server/src ./src
+
+# Build the sprite extractor
+RUN touch src/lib.rs src/main.rs src/bin/extract-sprites.rs && \
+    cargo build --release --bin extract-sprites
+
+# Copy cache files (split parts and index files)
+COPY ./cache/ /cache/
+
+# Assemble cache from split parts if needed
+RUN if [ ! -f /cache/main_file_cache.dat2 ] && ls /cache/main_file_cache.dat2.part_* 1>/dev/null 2>&1; then \
+    echo "Assembling cache from split parts..." && \
+    cat /cache/main_file_cache.dat2.part_* > /cache/main_file_cache.dat2 && \
+    echo "Cache assembled: $(ls -lh /cache/main_file_cache.dat2)"; \
+    fi
+
+# Create output directory
+RUN mkdir -p /sprites
+
+# Extract sprites from cache (if cache exists)
+RUN if [ -f /cache/main_file_cache.dat2 ]; then \
+    echo "Extracting sprites from cache..." && \
+    ./target/release/extract-sprites \
+        --cache /cache \
+        --output /sprites \
+        --verbose 2>&1 || echo "Sprite extraction completed (check for errors)"; \
+    ls -la /sprites/ 2>/dev/null || true; \
+    else \
+    echo "No cache files found, skipping sprite extraction"; \
+    fi
+
+# Stage 4: Nginx with built assets
 FROM nginx:alpine
 
 # Install curl for healthcheck
@@ -79,6 +132,7 @@ COPY ./config/ssl /etc/nginx/ssl
 # Create web client directories
 RUN mkdir -p /usr/share/nginx/html/web-client \
     /usr/share/nginx/html/kmp \
+    /usr/share/nginx/html/sprites \
     /usr/share/nginx/html/default
 
 # Copy built TypeScript web client from builder stage
@@ -88,6 +142,9 @@ COPY --from=ts-builder /build/dist/ /usr/share/nginx/html/web-client/
 # Copy built KMP WASM client from builder stage
 # Compose outputs to productionExecutable/
 COPY --from=kmp-builder /build/composeApp/build/dist/wasmJs/productionExecutable/ /usr/share/nginx/html/kmp/
+
+# Copy extracted sprites from sprite-extractor stage
+COPY --from=sprite-extractor /sprites/ /usr/share/nginx/html/sprites/
 
 # Copy static assets that might not be included in build
 COPY ./src/clients/web/assets/ /usr/share/nginx/html/web-client/assets/
@@ -101,8 +158,13 @@ COPY ./config/html/index.html /usr/share/nginx/html/index.html
 # Set proper permissions
 RUN chmod -R 755 /usr/share/nginx/html
 
-# Expose port
-EXPOSE 80
+# Log what sprites were extracted
+RUN echo "=== Sprites Directory ===" && \
+    ls -la /usr/share/nginx/html/sprites/ 2>/dev/null || echo "No sprites extracted" && \
+    find /usr/share/nginx/html/sprites -name "*.png" 2>/dev/null | wc -l | xargs -I {} echo "Total PNG sprites: {}"
+
+# Expose ports (HTTP and HTTPS)
+EXPOSE 80 443
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \

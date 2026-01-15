@@ -85,7 +85,7 @@ CREATE INDEX idx_password_tokens_token ON password_reset_tokens(token);
 CREATE TABLE sessions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    session_token VARCHAR(128) NOT NULL UNIQUE,
+    session_token TEXT NOT NULL UNIQUE,  -- TEXT to accommodate JWT tokens
 
     -- Connection info
     ip_address INET,

@@ -162,8 +162,13 @@ function hideLoading(): void {
 function getWebSocketUrl(): string {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
 
-    // Check if we're on port 8088 (nginx proxy)
-    if (window.location.port === "8088" || window.location.port === "") {
+    // Check if we're on nginx proxy ports (8088 HTTP or 8443 HTTPS)
+    const isNginxProxy =
+        window.location.port === "8088" ||
+        window.location.port === "8443" ||
+        window.location.port === "";
+
+    if (isNginxProxy) {
         return `${protocol}//${window.location.host}${CONFIG.wsPath}`;
     }
 
@@ -676,29 +681,32 @@ function buildLoginPacket(username: string, password: string): Uint8Array {
     // UID (can be any value for now)
     rsaBlock.writeInt(Math.floor(Math.random() * 0xffffffff));
 
-    // Password and username (null-terminated strings)
+    // Password (null-terminated string) - username is sent outside RSA block
     rsaBlock.writeString(password);
-    rsaBlock.writeString(username);
 
     const rsaBlockData = rsaBlock.toUint8Array();
 
     // Build the outer login packet
     const loginPacket = new ByteBuffer(256);
 
-    // Login packet structure:
+    // Login packet structure (must match server expectation):
     // - Size (2 bytes, big-endian) - total size after this
     // - Revision (4 bytes)
-    // - Some flags (4 bytes)
-    // - RSA block size (1 byte)
+    // - Low memory flag (1 byte)
+    // - RSA block size (2 bytes, unsigned short)
     // - RSA block data
+    // - Username (null-terminated string)
 
     const loginData = new ByteBuffer(256);
     loginData.writeInt(CONFIG.revision);
-    loginData.writeInt(0); // Flags
+    loginData.writeByte(0); // Low memory flag (0 = normal, 1 = low memory)
 
-    // RSA block size and data
-    loginData.writeByte(rsaBlockData.length);
+    // RSA block size (2 bytes) and data
+    loginData.writeShort(rsaBlockData.length);
     loginData.writeBytes(rsaBlockData);
+
+    // Username after RSA block (null-terminated)
+    loginData.writeString(username);
 
     const loginDataArray = loginData.toUint8Array();
 
@@ -955,9 +963,13 @@ function handleGamePacket(buffer: ByteBuffer): void {
             break;
 
         case ServerOpcode.LOGOUT: // Logout (86)
-            log("Server requested logout", "info");
-            gameState.reset();
-            logout();
+            // Logout packet should have no data (size 0)
+            // If it has data, it's likely a misinterpreted skill update
+            if (packetData.length <= 1) {
+                log("Server requested logout", "info");
+                gameState.reset();
+                logout();
+            }
             break;
 
         default:

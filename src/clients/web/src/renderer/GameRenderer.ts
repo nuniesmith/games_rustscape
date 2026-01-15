@@ -24,6 +24,8 @@ const GAME_WIDTH = 765;
 const GAME_HEIGHT = 503;
 const TILE_SIZE = 32;
 const MINIMAP_SIZE = 150;
+const MAP_VIEWPORT_WIDTH = 13; // Tiles visible horizontally
+const MAP_VIEWPORT_HEIGHT = 13; // Tiles visible vertically
 
 // Skill names for display
 const SKILL_NAMES = [
@@ -58,18 +60,33 @@ const SKILL_NAMES = [
 const COLORS = {
     background: 0x1a1a2e,
     backgroundLight: 0x16213e,
-    backgroundDark: 0x0f3460,
+    backgroundDark: 0x0f0f23,
     primary: 0xe94560,
     primaryLight: 0xff6b6b,
     text: 0xffffff,
-    textMuted: 0x888888,
+    textMuted: 0xaaaaaa,
     textYellow: 0xffff00,
     textCyan: 0x00ffff,
     textGold: 0xffd700,
     textSilver: 0xc0c0c0,
     mapGreen: 0x2d5a27,
-    chatBackground: 0x000000,
-    panelBackground: 0x000000,
+    chatBackground: 0x2a2a4a,
+    panelBackground: 0x3a3a5a,
+    // Ground tile colors for different terrain types
+    grass: 0x228b22,
+    grassLight: 0x32cd32,
+    grassDark: 0x006400,
+    dirt: 0x8b7355,
+    dirtLight: 0xa0826d,
+    dirtDark: 0x654321,
+    stone: 0x708090,
+    stoneLight: 0x778899,
+    stoneDark: 0x4a5568,
+    water: 0x1e90ff,
+    waterLight: 0x4169e1,
+    waterDark: 0x0000cd,
+    sand: 0xf4a460,
+    sandLight: 0xdeb887,
 };
 
 /**
@@ -105,6 +122,9 @@ export class GameRenderer {
     private app: Application | null = null;
     private canvas: HTMLCanvasElement;
     private initialized = false;
+    private contextLost = false;
+    private contextLostHandler: ((e: Event) => void) | null = null;
+    private contextRestoredHandler: ((e: Event) => void) | null = null;
 
     // Containers for organizing render layers
     private worldContainer: Container | null = null;
@@ -118,6 +138,8 @@ export class GameRenderer {
     private chatPanel: Container | null = null;
     private playerSprite: Container | null = null;
     private playerNameText: Text | null = null;
+    private mapTiles: Graphics | null = null;
+    private groundTextures: Map<string, Texture> = new Map();
 
     // Loaded assets
     private sprites: Map<string, Texture> = new Map();
@@ -150,6 +172,9 @@ export class GameRenderer {
 
         console.log("Initializing PixiJS renderer...");
 
+        // Set up WebGL context loss handlers before creating the app
+        this.setupContextLossHandlers();
+
         // Create PixiJS application
         this.app = new Application();
 
@@ -161,6 +186,8 @@ export class GameRenderer {
             antialias: true,
             resolution: window.devicePixelRatio || 1,
             autoDensity: true,
+            powerPreference: "high-performance",
+            preserveDrawingBuffer: false,
         });
 
         // Create render layers
@@ -189,26 +216,178 @@ export class GameRenderer {
     }
 
     /**
+     * Set up WebGL context loss/restore handlers
+     */
+    private setupContextLossHandlers(): void {
+        // Handler for context lost
+        this.contextLostHandler = (e: Event) => {
+            e.preventDefault();
+            this.contextLost = true;
+            console.warn(
+                "WebGL context lost - renderer paused. Waiting for restore...",
+            );
+
+            // Stop the ticker to prevent render attempts
+            if (this.app?.ticker) {
+                this.app.ticker.stop();
+            }
+        };
+
+        // Handler for context restored
+        this.contextRestoredHandler = async () => {
+            console.log("WebGL context restored - reinitializing renderer...");
+            this.contextLost = false;
+
+            try {
+                // Restart the ticker
+                if (this.app?.ticker) {
+                    this.app.ticker.start();
+                }
+
+                // Recreate textures and sprites since they were lost
+                this.createPlaceholderTextures();
+
+                // Force a re-render
+                if (this.app?.renderer) {
+                    this.app.render();
+                }
+
+                console.log("WebGL context successfully restored");
+            } catch (error) {
+                console.error("Failed to restore WebGL context:", error);
+            }
+        };
+
+        // Attach handlers to the canvas
+        this.canvas.addEventListener(
+            "webglcontextlost",
+            this.contextLostHandler,
+            false,
+        );
+        this.canvas.addEventListener(
+            "webglcontextrestored",
+            this.contextRestoredHandler,
+            false,
+        );
+    }
+
+    /**
+     * Remove WebGL context loss handlers
+     */
+    private removeContextLossHandlers(): void {
+        if (this.contextLostHandler) {
+            this.canvas.removeEventListener(
+                "webglcontextlost",
+                this.contextLostHandler,
+            );
+            this.contextLostHandler = null;
+        }
+        if (this.contextRestoredHandler) {
+            this.canvas.removeEventListener(
+                "webglcontextrestored",
+                this.contextRestoredHandler,
+            );
+            this.contextRestoredHandler = null;
+        }
+    }
+
+    /**
+     * Check if WebGL context is currently lost
+     */
+    isContextLost(): boolean {
+        return this.contextLost;
+    }
+
+    /**
      * Load game assets
      */
     private async loadAssets(): Promise<void> {
         console.log("Loading game assets...");
 
         try {
-            // Try to load sprite sheets from server
-            // For now, we'll use placeholder graphics
-            // In production, these would be extracted from the game cache
+            // Try to load sprite manifest from server
+            const spritesLoaded = await this.loadSpritesFromServer();
 
-            // Placeholder: Create basic textures programmatically
-            this.createPlaceholderTextures();
+            if (!spritesLoaded) {
+                console.log("Server sprites not available, using placeholders");
+                this.createPlaceholderTextures();
+            }
 
             this.loadedAssets = true;
-            console.log("Assets loaded (using placeholders)");
+            console.log(
+                "Assets loaded" +
+                    (spritesLoaded ? " from server" : " (using placeholders)"),
+            );
         } catch (error) {
             console.warn("Failed to load assets, using placeholders:", error);
             this.createPlaceholderTextures();
             this.loadedAssets = true;
         }
+    }
+
+    /**
+     * Attempt to load sprites from the server
+     */
+    private async loadSpritesFromServer(): Promise<boolean> {
+        try {
+            // Check if sprite manifest exists
+            const manifestUrl = "/sprites/sprites/manifest.json";
+            const response = await fetch(manifestUrl);
+
+            if (!response.ok) {
+                console.log("Sprite manifest not found at", manifestUrl);
+                return false;
+            }
+
+            const manifest = await response.json();
+            console.log(`Loading ${manifest.count} sprites from server...`);
+
+            // Load commonly used sprites
+            const prioritySprites = [
+                // UI elements
+                { id: 0, name: "logo" },
+                { id: 1, name: "button" },
+                { id: 2, name: "icon" },
+            ];
+
+            let loadedCount = 0;
+            for (const spriteInfo of manifest.sprites || []) {
+                try {
+                    const texture = await Assets.load(
+                        `/sprites/${spriteInfo.path}`,
+                    );
+                    if (texture) {
+                        this.sprites.set(
+                            `sprite_${spriteInfo.id}_${spriteInfo.frame}`,
+                            texture,
+                        );
+                        loadedCount++;
+                    }
+                } catch (e) {
+                    // Skip sprites that fail to load
+                }
+
+                // Limit initial load to prevent long load times
+                if (loadedCount >= 100) {
+                    console.log(`Loaded ${loadedCount} priority sprites`);
+                    break;
+                }
+            }
+
+            console.log(`Loaded ${loadedCount} sprites from server`);
+            return loadedCount > 0;
+        } catch (error) {
+            console.log("Could not load sprites from server:", error);
+            return false;
+        }
+    }
+
+    /**
+     * Get a sprite texture by ID, with fallback to placeholder
+     */
+    getSprite(id: number, frame: number = 0): Texture | null {
+        const key = `sprite_${id}_${frame}`;
+        return this.sprites.get(key) || null;
     }
 
     /**
@@ -222,8 +401,62 @@ export class GameRenderer {
         playerGraphics.circle(12, 12, 5);
         playerGraphics.fill(COLORS.primaryLight);
 
-        // Convert graphics to texture would require additional setup
-        // For now, we'll use Graphics directly
+        // Create ground tile textures procedurally
+        this.createGroundTextures();
+    }
+
+    /**
+     * Create procedural ground textures for map rendering
+     */
+    private createGroundTextures(): void {
+        // We'll use Graphics objects for tile rendering
+        // In production, these would be loaded from cache textures
+        console.log("Ground textures initialized (procedural)");
+    }
+
+    /**
+     * Get terrain color based on position (procedural generation)
+     */
+    private getTerrainColor(worldX: number, worldY: number): number {
+        // Simple procedural terrain based on position
+        // This creates a varied landscape without actual map data
+        const noise1 = Math.sin(worldX * 0.1) * Math.cos(worldY * 0.1);
+        const noise2 =
+            Math.sin(worldX * 0.05 + 100) * Math.cos(worldY * 0.05 + 100);
+        const combined = (noise1 + noise2) / 2;
+
+        // Determine terrain type based on noise
+        if (combined < -0.3) {
+            // Water areas
+            return COLORS.water;
+        } else if (combined < -0.1) {
+            // Sand/beach near water
+            return COLORS.sand;
+        } else if (combined < 0.2) {
+            // Grass (most common)
+            const variation = Math.abs(Math.sin(worldX * 0.3 + worldY * 0.2));
+            if (variation < 0.3) return COLORS.grassDark;
+            if (variation < 0.6) return COLORS.grass;
+            return COLORS.grassLight;
+        } else if (combined < 0.5) {
+            // Dirt paths
+            const variation = Math.abs(Math.cos(worldX * 0.4 + worldY * 0.3));
+            if (variation < 0.5) return COLORS.dirt;
+            return COLORS.dirtLight;
+        } else {
+            // Stone/rocky areas
+            const variation = Math.abs(Math.sin(worldX * 0.5 + worldY * 0.5));
+            if (variation < 0.5) return COLORS.stone;
+            return COLORS.stoneDark;
+        }
+    }
+
+    /**
+     * Get tile height variation for 3D effect
+     */
+    private getTileHeight(worldX: number, worldY: number): number {
+        const noise = Math.sin(worldX * 0.08) * Math.cos(worldY * 0.08);
+        return Math.floor(noise * 3);
     }
 
     /**
@@ -232,44 +465,180 @@ export class GameRenderer {
     private createWorld(): void {
         if (!this.worldContainer) return;
 
-        // Create gradient background
-        const bg = new Graphics();
+        // Create sky gradient background
+        const sky = new Graphics();
+        const skyGradientSteps = 10;
+        const skyHeight = 100;
+        const stepHeight = skyHeight / skyGradientSteps;
 
-        // Draw gradient manually (PixiJS 8 approach)
-        const gradientSteps = 20;
-        const stepHeight = (GAME_HEIGHT - 100) / gradientSteps;
+        for (let i = 0; i < skyGradientSteps; i++) {
+            const ratio = i / skyGradientSteps;
+            const color = this.lerpColor(0x87ceeb, 0xb0e0e6, ratio);
+            sky.rect(0, i * stepHeight, GAME_WIDTH - 180, stepHeight + 1);
+            sky.fill(color);
+        }
+        this.worldContainer.addChild(sky);
 
-        for (let i = 0; i < gradientSteps; i++) {
-            const ratio = i / gradientSteps;
-            const color = this.lerpColor(
-                COLORS.backgroundLight,
-                COLORS.backgroundDark,
-                ratio,
-            );
-            bg.rect(0, i * stepHeight, GAME_WIDTH, stepHeight + 1);
-            bg.fill(color);
+        // Create the tile-based map container
+        this.mapTiles = new Graphics();
+        this.worldContainer.addChild(this.mapTiles);
+
+        // Initial render of map tiles
+        this.renderMapTiles();
+
+        // Add subtle vignette effect around edges
+        const vignette = new Graphics();
+        vignette.rect(0, 0, GAME_WIDTH - 180, GAME_HEIGHT - 100);
+        vignette.fill({ color: 0x000000, alpha: 0 });
+        // Top edge shadow
+        for (let i = 0; i < 20; i++) {
+            vignette.rect(0, i, GAME_WIDTH - 180, 1);
+            vignette.fill({ color: 0x000000, alpha: (20 - i) * 0.01 });
+        }
+        this.worldContainer.addChild(vignette);
+    }
+
+    /**
+     * Render the visible map tiles based on player position
+     */
+    private renderMapTiles(): void {
+        if (!this.mapTiles) return;
+
+        this.mapTiles.clear();
+
+        const centerX = this.gameState.position.x;
+        const centerY = this.gameState.position.y;
+
+        // Calculate viewport bounds
+        const viewWidth = GAME_WIDTH - 180; // Account for side panel
+        const viewHeight = GAME_HEIGHT - 100; // Account for chat panel
+
+        // Calculate tile size to fit viewport (isometric-style)
+        const tileWidth = Math.floor(viewWidth / MAP_VIEWPORT_WIDTH);
+        const tileHeight = Math.floor(tileWidth * 0.6); // Slight perspective
+
+        // Starting world coordinates
+        const startX = centerX - Math.floor(MAP_VIEWPORT_WIDTH / 2);
+        const startY = centerY - Math.floor(MAP_VIEWPORT_HEIGHT / 2);
+
+        // Render tiles from back to front for proper layering
+        for (let dy = 0; dy < MAP_VIEWPORT_HEIGHT; dy++) {
+            for (let dx = 0; dx < MAP_VIEWPORT_WIDTH; dx++) {
+                const worldX = startX + dx;
+                const worldY = startY + dy;
+
+                // Get terrain type and color
+                const baseColor = this.getTerrainColor(worldX, worldY);
+                const heightOffset = this.getTileHeight(worldX, worldY);
+
+                // Calculate screen position
+                const screenX = dx * tileWidth;
+                const screenY = 100 + dy * tileHeight - heightOffset * 2;
+
+                // Draw tile with slight 3D effect
+                this.drawTile(
+                    screenX,
+                    screenY,
+                    tileWidth,
+                    tileHeight,
+                    baseColor,
+                    heightOffset,
+                );
+            }
         }
 
-        this.worldContainer.addChild(bg);
+        // Draw grid overlay (optional, can be toggled)
+        this.drawTileGrid(viewWidth, viewHeight, tileWidth, tileHeight);
+    }
 
-        // Draw grid lines
-        const grid = new Graphics();
-        grid.stroke({ width: 1, color: 0xffffff, alpha: 0.05 });
+    /**
+     * Draw a single map tile with pseudo-3D shading
+     */
+    private drawTile(
+        x: number,
+        y: number,
+        width: number,
+        height: number,
+        color: number,
+        heightOffset: number,
+    ): void {
+        if (!this.mapTiles) return;
+
+        // Calculate shading based on position and height
+        const shadeFactor = 0.8 + heightOffset * 0.05;
+        const shadedColor = this.shadeColor(color, shadeFactor);
+
+        // Draw main tile surface
+        this.mapTiles.rect(x, y, width - 1, height - 1);
+        this.mapTiles.fill(shadedColor);
+
+        // Add highlight on top edge
+        this.mapTiles.rect(x, y, width - 1, 2);
+        this.mapTiles.fill({ color: 0xffffff, alpha: 0.1 });
+
+        // Add shadow on bottom edge
+        this.mapTiles.rect(x, y + height - 3, width - 1, 2);
+        this.mapTiles.fill({ color: 0x000000, alpha: 0.15 });
+
+        // Add some random vegetation/detail dots on grass tiles
+        if (
+            color === COLORS.grass ||
+            color === COLORS.grassLight ||
+            color === COLORS.grassDark
+        ) {
+            const detailCount = Math.floor(Math.random() * 3);
+            for (let i = 0; i < detailCount; i++) {
+                const dotX = x + 5 + Math.random() * (width - 10);
+                const dotY = y + 5 + Math.random() * (height - 10);
+                this.mapTiles.circle(dotX, dotY, 1);
+                this.mapTiles.fill({ color: COLORS.grassDark, alpha: 0.5 });
+            }
+        }
+    }
+
+    /**
+     * Draw tile grid overlay
+     */
+    private drawTileGrid(
+        viewWidth: number,
+        viewHeight: number,
+        tileWidth: number,
+        tileHeight: number,
+    ): void {
+        if (!this.mapTiles) return;
+
+        // Very subtle grid lines
+        this.mapTiles.stroke({ width: 1, color: 0x000000, alpha: 0.1 });
 
         // Vertical lines
-        for (let x = 0; x < GAME_WIDTH; x += 50) {
-            grid.moveTo(x, 0);
-            grid.lineTo(x, GAME_HEIGHT - 100);
+        for (let x = 0; x <= viewWidth; x += tileWidth) {
+            this.mapTiles.moveTo(x, 100);
+            this.mapTiles.lineTo(x, 100 + MAP_VIEWPORT_HEIGHT * tileHeight);
         }
 
         // Horizontal lines
-        for (let y = 0; y < GAME_HEIGHT - 100; y += 50) {
-            grid.moveTo(0, y);
-            grid.lineTo(GAME_WIDTH, y);
+        for (let y = 0; y <= MAP_VIEWPORT_HEIGHT; y++) {
+            this.mapTiles.moveTo(0, 100 + y * tileHeight);
+            this.mapTiles.lineTo(viewWidth, 100 + y * tileHeight);
         }
+    }
 
-        grid.stroke();
-        this.worldContainer.addChild(grid);
+    /**
+     * Apply shade/brightness to a color
+     */
+    private shadeColor(color: number, factor: number): number {
+        const r = Math.min(255, Math.floor(((color >> 16) & 0xff) * factor));
+        const g = Math.min(255, Math.floor(((color >> 8) & 0xff) * factor));
+        const b = Math.min(255, Math.floor((color & 0xff) * factor));
+        return (r << 16) | (g << 8) | b;
+    }
+
+    /**
+     * Update map when player position changes
+     */
+    updateMapPosition(x: number, y: number, z: number): void {
+        this.gameState.position = { x, y, z };
+        this.renderMapTiles();
     }
 
     /**
@@ -734,10 +1103,11 @@ export class GameRenderer {
 
     /**
      * Stop the renderer
+     * Note: PixiJS 8 removed app.stop() - the ticker is managed differently
      */
     stop(): void {
-        if (this.app) {
-            this.app.stop();
+        if (this.app && this.app.ticker) {
+            this.app.ticker.stop();
         }
         console.log("Renderer stopped");
     }
@@ -746,6 +1116,9 @@ export class GameRenderer {
      * Destroy the renderer and clean up resources
      */
     destroy(): void {
+        // Remove WebGL context handlers first
+        this.removeContextLossHandlers();
+
         if (this.app) {
             this.app.destroy(true, { children: true, texture: true });
             this.app = null;
@@ -754,6 +1127,7 @@ export class GameRenderer {
         this.sprites.clear();
         this.initialized = false;
         this.loadedAssets = false;
+        this.contextLost = false;
 
         console.log("Renderer destroyed");
     }
@@ -807,6 +1181,8 @@ export class GameRenderer {
     setMapRegion(x: number, y: number): void {
         this.gameState.mapRegion = { x, y };
         this.updateMinimapRegion();
+        // Re-render map tiles when region changes
+        this.renderMapTiles();
     }
 
     /**
