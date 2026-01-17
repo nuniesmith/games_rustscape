@@ -168,21 +168,42 @@ data class MapRegion(
 }
 
 /**
- * Chat message types
+ * Chat message types - matching classic RS chat channels
  */
 enum class MessageType(val id: Int) {
-    GAME(0),
-    PUBLIC_CHAT(1),
-    PRIVATE_MESSAGE_IN(2),
-    PRIVATE_MESSAGE_OUT(3),
-    TRADE_REQUEST(4),
-    FRIEND_STATUS(5),
-    CLAN_CHAT(9),
-    FILTERED(109);
+    SYSTEM(0),      // System messages (cyan)
+    GAME(1),        // Game messages (white)
+    PUBLIC(2),      // Public chat (yellow)
+    PRIVATE(3),     // Private messages (cyan/teal)
+    CLAN(4),        // Clan chat (dark red)
+    TRADE(5),       // Trade messages (purple)
+    COMMAND(6);     // Command responses (orange)
 
     companion object {
         fun fromId(id: Int): MessageType = entries.find { it.id == id } ?: GAME
     }
+}
+
+/**
+ * Skill type enum for UI display ordering
+ */
+enum class SkillType {
+    ATTACK, DEFENCE, STRENGTH, HITPOINTS, RANGED, PRAYER, MAGIC,
+    COOKING, WOODCUTTING, FLETCHING, FISHING, FIREMAKING, CRAFTING,
+    SMITHING, MINING, HERBLORE, AGILITY, THIEVING, SLAYER, FARMING,
+    RUNECRAFT, HUNTER, CONSTRUCTION, SUMMONING
+}
+
+/**
+ * Skill info for UI display
+ */
+data class SkillInfo(
+    val id: Int,
+    val level: Int = 1,
+    val experience: Long = 0,
+    val currentLevel: Int = level  // Can be boosted/drained
+) {
+    val name: String get() = SkillId.getName(id)
 }
 
 /**
@@ -192,10 +213,26 @@ enum class MessageType(val id: Int) {
 data class ChatMessage(
     val text: String,
     val sender: String? = null,
-    val type: Int = MessageType.GAME.id,
-    val timestamp: Long = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+    val type: MessageType = MessageType.GAME,
+    val timestamp: String? = null  // Optional formatted timestamp like "12:34"
 ) {
-    val messageType: MessageType get() = MessageType.fromId(type)
+    // For serialization compatibility
+    constructor(text: String, sender: String?, typeId: Int, timestampMs: Long) : this(
+        text = text,
+        sender = sender,
+        type = MessageType.fromId(typeId),
+        timestamp = formatTimestamp(timestampMs)
+    )
+
+    companion object {
+        private fun formatTimestamp(ms: Long): String {
+            // Simple hour:minute format
+            val totalSeconds = ms / 1000
+            val hours = (totalSeconds / 3600) % 24
+            val minutes = (totalSeconds / 60) % 60
+            return "${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}"
+        }
+    }
 }
 
 /**
@@ -268,8 +305,8 @@ class GameState {
     var position: Position = Position()
     var mapRegion: MapRegion = MapRegion()
 
-    // Skills (23 skills total)
-    val skills: Array<Skill> = Array(SkillId.SKILL_COUNT) { Skill(it) }
+    // Skills (24 skills total including Summoning)
+    val skills: Array<SkillInfo> = Array(24) { SkillInfo(it) }
 
     // Energy and weight
     var runEnergy: Int = 100
@@ -296,15 +333,13 @@ class GameState {
 
     // ============ Skill Methods ============
 
-    fun getSkill(id: Int): Skill? {
+    fun getSkill(id: Int): SkillInfo? {
         return skills.getOrNull(id)
     }
 
-    fun updateSkill(id: Int, level: Int, experience: Int) {
-        skills.getOrNull(id)?.let { skill ->
-            skill.level = level
-            skill.experience = experience
-            skill.boostedLevel = level
+    fun updateSkill(id: Int, level: Int, experience: Int, currentLevel: Int = level) {
+        if (id in skills.indices) {
+            skills[id] = SkillInfo(id, level, experience.toLong(), currentLevel)
             notifyListeners { it.onSkillUpdated(id, level, experience) }
         }
     }
@@ -339,7 +374,7 @@ class GameState {
     }
 
     fun addMessage(text: String, type: MessageType = MessageType.GAME, sender: String? = null) {
-        addMessage(ChatMessage(text, sender, type.id))
+        addMessage(ChatMessage(text, sender, type))
     }
 
     fun clearMessages() {
@@ -412,10 +447,9 @@ class GameState {
         weight = 0
         isRunning = false
 
-        skills.forEachIndexed { index, skill ->
-            skill.level = if (index == SkillId.HITPOINTS) 10 else 1
-            skill.experience = 0
-            skill.boostedLevel = skill.level
+        for (i in skills.indices) {
+            val defaultLevel = if (i == SkillId.HITPOINTS) 10 else 1
+            skills[i] = SkillInfo(i, defaultLevel, 0, defaultLevel)
         }
 
         _messages.clear()

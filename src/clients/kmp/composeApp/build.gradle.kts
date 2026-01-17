@@ -16,6 +16,18 @@ kotlin {
         browser {
             commonWebpackConfig {
                 outputFileName = "rustscape-client.js"
+                // Enable production optimizations
+                devServer?.open = false
+            }
+            // Enable Binaryen optimization for smaller WASM output
+            applyBinaryen {
+                binaryenArgs = mutableListOf(
+                    "-O3",              // Maximum optimization level
+                    "--enable-gc",      // Enable GC for Kotlin WASM
+                    "--enable-strings", // Enable string builtins
+                    "--closed-world",   // Assume closed world for better optimization
+                    "--traps-never-happen" // Assume traps won't happen (faster code)
+                )
             }
             binaries.executable()
         }
@@ -185,5 +197,81 @@ tasks.register("packageAll") {
     doLast {
         println("All distributions have been built!")
         println("Output directory: ${layout.buildDirectory.dir("compose/binaries/main").get()}")
+    }
+}
+
+// Task to build optimized WASM production bundle
+tasks.register("buildOptimizedWasm") {
+    group = "build"
+    description = "Build optimized WASM bundle with compression for production"
+
+    dependsOn("wasmJsBrowserProductionWebpack")
+
+    doLast {
+        val buildDir = layout.buildDirectory.dir("dist/wasmJs/productionExecutable").get().asFile
+
+        println("")
+        println("╔═══════════════════════════════════════════════════════════╗")
+        println("║          Optimized WASM Build Complete!                   ║")
+        println("╚═══════════════════════════════════════════════════════════╝")
+        println("")
+
+        // Report file sizes
+        if (buildDir.exists()) {
+            println("Bundle sizes:")
+            buildDir.listFiles()?.filter { it.extension in listOf("js", "wasm") }?.forEach { file ->
+                val sizeKb = file.length() / 1024
+                val sizeMb = sizeKb / 1024.0
+                val sizeStr = if (sizeMb >= 1) String.format("%.2f MiB", sizeMb) else "$sizeKb KiB"
+                println("  ${file.name}: $sizeStr")
+            }
+            println("")
+            println("Output directory: $buildDir")
+            println("")
+            println("To further reduce transfer size, run:")
+            println("  ./composeApp/compress-assets.sh")
+            println("")
+            println("This will create .gz and .br pre-compressed files for nginx.")
+        }
+    }
+}
+
+// Task to analyze bundle composition
+tasks.register("analyzeBundleSize") {
+    group = "help"
+    description = "Analyze WASM bundle size and provide optimization tips"
+
+    doLast {
+        val buildDir = layout.buildDirectory.dir("dist/wasmJs/productionExecutable").get().asFile
+
+        println("")
+        println("╔═══════════════════════════════════════════════════════════╗")
+        println("║              Bundle Size Analysis                         ║")
+        println("╚═══════════════════════════════════════════════════════════╝")
+        println("")
+
+        if (!buildDir.exists()) {
+            println("Build directory not found. Run './gradlew wasmJsBrowserProductionWebpack' first.")
+            return@doLast
+        }
+
+        var totalSize = 0L
+        val files = buildDir.listFiles()?.filter { it.extension in listOf("js", "wasm", "html") } ?: emptyList()
+
+        files.sortedByDescending { it.length() }.forEach { file ->
+            val sizeKb = file.length() / 1024
+            totalSize += file.length()
+            println("  ${file.name.padEnd(40)} ${sizeKb.toString().padStart(8)} KiB")
+        }
+
+        println("  ${"─".repeat(52)}")
+        println("  ${"TOTAL".padEnd(40)} ${(totalSize / 1024).toString().padStart(8)} KiB")
+        println("")
+        println("Optimization tips:")
+        println("  1. Binaryen optimization is ${if (project.findProperty("kotlin.wasm.binaryen.enable") == "true") "ENABLED ✓" else "DISABLED - add kotlin.wasm.binaryen.enable=true"}")
+        println("  2. DCE (Dead Code Elimination) is ${if (project.findProperty("kotlin.js.ir.dce") == "true") "ENABLED ✓" else "DISABLED - add kotlin.js.ir.dce=true"}")
+        println("  3. Pre-compress with gzip/brotli for 60-70% transfer size reduction")
+        println("  4. Enable HTTP/2 on your server for multiplexed loading")
+        println("")
     }
 }

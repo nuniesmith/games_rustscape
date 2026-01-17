@@ -10,6 +10,8 @@ import com.rustscape.client.game.PlayerRights
 import com.rustscape.client.network.ClientConfig
 import com.rustscape.client.network.ClientEvent
 import com.rustscape.client.network.ConnectionState
+import com.rustscape.client.ui.components.LocalSoundManager
+import com.rustscape.client.ui.components.RSSound
 import com.rustscape.client.ui.screens.GameScreen
 import com.rustscape.client.ui.screens.LoginScreen
 import com.rustscape.client.ui.theme.RustscapeTheme
@@ -64,8 +66,9 @@ fun App(
     clientEvents: Flow<ClientEvent>? = null
 ) {
     val scope = rememberCoroutineScope()
+    val soundManager = LocalSoundManager.current
 
-    // Collect client events
+    // Collect client events and play appropriate sounds
     LaunchedEffect(clientEvents) {
         clientEvents?.collect { event ->
             when (event) {
@@ -86,27 +89,37 @@ fun App(
                         event.rights,
                         event.member
                     )
+                    // Play login success sound
+                    soundManager?.play(RSSound.LOGIN_SUCCESS)
                 }
 
                 is ClientEvent.LoginFailed -> {
                     appState.isLoading = false
                     appState.errorMessage = event.message
                     appState.currentScreen = AppScreen.LOGIN
+                    // Play login failure sound
+                    soundManager?.play(RSSound.LOGIN_FAIL)
                 }
 
                 is ClientEvent.Error -> {
                     appState.isLoading = false
                     appState.errorMessage = event.message
+                    // Play error sound
+                    soundManager?.play(RSSound.ERROR)
                 }
 
                 is ClientEvent.Disconnected -> {
                     appState.currentScreen = AppScreen.LOGIN
                     appState.isLoading = false
+                    // Play logout/disconnect sound
+                    soundManager?.play(RSSound.LOGOUT)
                 }
 
                 is ClientEvent.Reconnecting -> {
                     appState.isLoading = true
                     appState.errorMessage = "Reconnecting..."
+                    // Play warning sound for reconnection
+                    soundManager?.play(RSSound.WARNING)
                 }
 
                 is ClientEvent.PacketReceived -> {

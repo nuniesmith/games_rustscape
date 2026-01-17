@@ -3,7 +3,11 @@ package com.rustscape.client.ui.theme
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -261,6 +265,307 @@ val RustscapeTypography = Typography(
 )
 
 /**
+ * RS-specific typography styles for pixel-perfect classic look
+ * These styles simulate the classic RuneScape font appearance
+ */
+object RSTypography {
+    /**
+     * Classic RS chat font style - small, readable
+     */
+    val chat = TextStyle(
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Normal,
+        fontSize = 12.sp,
+        lineHeight = 14.sp,
+        letterSpacing = 0.sp,
+        color = RustscapeColors.TextPrimary,
+        shadow = Shadow(
+            color = Color.Black,
+            offset = Offset(1f, 1f),
+            blurRadius = 0f
+        )
+    )
+
+    /**
+     * Chat font with no shadow (for colored backgrounds)
+     */
+    val chatNoShadow = TextStyle(
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Normal,
+        fontSize = 12.sp,
+        lineHeight = 14.sp,
+        letterSpacing = 0.sp,
+        color = RustscapeColors.TextPrimary
+    )
+
+    /**
+     * Bold chat font for player names
+     */
+    val chatBold = TextStyle(
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Bold,
+        fontSize = 12.sp,
+        lineHeight = 14.sp,
+        letterSpacing = 0.sp,
+        color = RustscapeColors.TextPrimary,
+        shadow = Shadow(
+            color = Color.Black,
+            offset = Offset(1f, 1f),
+            blurRadius = 0f
+        )
+    )
+
+    /**
+     * Skill panel numbers
+     */
+    val skillLevel = TextStyle(
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Bold,
+        fontSize = 11.sp,
+        lineHeight = 12.sp,
+        letterSpacing = 0.sp,
+        color = RustscapeColors.TextPrimary,
+        shadow = Shadow(
+            color = Color.Black,
+            offset = Offset(1f, 1f),
+            blurRadius = 0f
+        )
+    )
+
+    /**
+     * Small UI labels (item counts, etc.)
+     */
+    val smallLabel = TextStyle(
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Normal,
+        fontSize = 10.sp,
+        lineHeight = 11.sp,
+        letterSpacing = 0.sp,
+        color = RustscapeColors.TextPrimary,
+        shadow = Shadow(
+            color = Color.Black,
+            offset = Offset(1f, 1f),
+            blurRadius = 0f
+        )
+    )
+
+    /**
+     * Game title style (login screen)
+     */
+    val gameTitle = TextStyle(
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Bold,
+        fontSize = 32.sp,
+        lineHeight = 36.sp,
+        letterSpacing = 2.sp,
+        color = RustscapeColors.TextGold,
+        shadow = Shadow(
+            color = Color.Black,
+            offset = Offset(2f, 2f),
+            blurRadius = 0f
+        )
+    )
+
+    /**
+     * Panel header text
+     */
+    val panelHeader = TextStyle(
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Bold,
+        fontSize = 14.sp,
+        lineHeight = 16.sp,
+        letterSpacing = 0.5.sp,
+        color = RustscapeColors.TextOrange,
+        shadow = Shadow(
+            color = Color.Black,
+            offset = Offset(1f, 1f),
+            blurRadius = 0f
+        )
+    )
+
+    /**
+     * Button text
+     */
+    val button = TextStyle(
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Bold,
+        fontSize = 13.sp,
+        lineHeight = 15.sp,
+        letterSpacing = 0.sp,
+        color = RustscapeColors.TextPrimary,
+        shadow = Shadow(
+            color = Color.Black,
+            offset = Offset(1f, 1f),
+            blurRadius = 0f
+        )
+    )
+
+    /**
+     * Tooltip text
+     */
+    val tooltip = TextStyle(
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Normal,
+        fontSize = 11.sp,
+        lineHeight = 13.sp,
+        letterSpacing = 0.sp,
+        color = RustscapeColors.TextPrimary,
+        shadow = Shadow(
+            color = Color.Black,
+            offset = Offset(1f, 1f),
+            blurRadius = 0f
+        )
+    )
+
+    /**
+     * Context menu text
+     */
+    val contextMenu = TextStyle(
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Normal,
+        fontSize = 12.sp,
+        lineHeight = 14.sp,
+        letterSpacing = 0.sp,
+        color = RustscapeColors.TextPrimary
+    )
+
+    /**
+     * Name tag style for entities
+     */
+    val nameTag = TextStyle(
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Bold,
+        fontSize = 11.sp,
+        lineHeight = 12.sp,
+        letterSpacing = 0.sp,
+        color = RustscapeColors.TextPrimary,
+        shadow = Shadow(
+            color = Color.Black,
+            offset = Offset(1f, 1f),
+            blurRadius = 0f
+        )
+    )
+
+    /**
+     * Combat level text
+     */
+    val combatLevel = TextStyle(
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Normal,
+        fontSize = 10.sp,
+        lineHeight = 11.sp,
+        letterSpacing = 0.sp,
+        color = RustscapeColors.TextCyan,
+        shadow = Shadow(
+            color = Color.Black,
+            offset = Offset(1f, 1f),
+            blurRadius = 0f
+        )
+    )
+
+    /**
+     * XP drop text
+     */
+    val xpDrop = TextStyle(
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Bold,
+        fontSize = 14.sp,
+        lineHeight = 16.sp,
+        letterSpacing = 0.sp,
+        color = RustscapeColors.TextWhite,
+        shadow = Shadow(
+            color = Color.Black,
+            offset = Offset(1f, 1f),
+            blurRadius = 0f
+        )
+    )
+
+    /**
+     * Level up text
+     */
+    val levelUp = TextStyle(
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Bold,
+        fontSize = 18.sp,
+        lineHeight = 20.sp,
+        letterSpacing = 1.sp,
+        color = RustscapeColors.TextGold,
+        shadow = Shadow(
+            color = Color.Black,
+            offset = Offset(2f, 2f),
+            blurRadius = 0f
+        )
+    )
+
+    /**
+     * System message style
+     */
+    val systemMessage = TextStyle(
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Normal,
+        fontSize = 12.sp,
+        lineHeight = 14.sp,
+        letterSpacing = 0.sp,
+        color = RustscapeColors.TextCyan,
+        shadow = Shadow(
+            color = Color.Black,
+            offset = Offset(1f, 1f),
+            blurRadius = 0f
+        )
+    )
+
+    /**
+     * Quest text style
+     */
+    val questText = TextStyle(
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Normal,
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
+        letterSpacing = 0.sp,
+        color = RustscapeColors.TextWhite
+    )
+
+    /**
+     * Quest title style
+     */
+    val questTitle = TextStyle(
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Bold,
+        fontSize = 14.sp,
+        lineHeight = 16.sp,
+        letterSpacing = 0.sp,
+        color = RustscapeColors.TextRed,
+        shadow = Shadow(
+            color = Color.Black,
+            offset = Offset(1f, 1f),
+            blurRadius = 0f
+        )
+    )
+
+    /**
+     * Helper to create a style with a different color
+     */
+    fun withColor(style: TextStyle, color: Color): TextStyle = style.copy(color = color)
+
+    /**
+     * Helper to create a style without shadow
+     */
+    fun withoutShadow(style: TextStyle): TextStyle = style.copy(shadow = null)
+
+    /**
+     * Helper to create a style with custom shadow
+     */
+    fun withShadow(style: TextStyle, shadowColor: Color = Color.Black, offset: Offset = Offset(1f, 1f)): TextStyle =
+        style.copy(shadow = Shadow(color = shadowColor, offset = offset, blurRadius = 0f))
+}
+
+/**
+ * CompositionLocal to provide RS typography throughout the app
+ */
+val LocalRSTypography = staticCompositionLocalOf { RSTypography }
+
+/**
  * Main Rustscape theme composable
  */
 @Composable
@@ -271,11 +576,15 @@ fun RustscapeTheme(
     // Always use dark theme for Rustscape (RS-style)
     val colorScheme = RustscapeDarkColorScheme
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = RustscapeTypography,
-        content = content
-    )
+    CompositionLocalProvider(
+        LocalRSTypography provides RSTypography
+    ) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = RustscapeTypography,
+            content = content
+        )
+    }
 }
 
 /**

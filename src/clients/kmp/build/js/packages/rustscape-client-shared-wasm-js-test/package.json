@@ -16,9 +16,8 @@
     "karma-chrome-launcher": "3.2.0"
   },
   "dependencies": {
-    "ws": "8.5.0",
-    "format-util": "^1.0.5",
-    "@js-joda/core": "3.2.0"
+    "@js-joda/core": "3.2.0",
+    "format-util": "^1.0.5"
   },
   "peerDependencies": {},
   "optionalDependencies": {},

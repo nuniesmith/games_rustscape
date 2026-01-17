@@ -31,17 +31,11 @@ kotlin {
             // Serialization for data classes
             implementation(libs.kotlinx.serialization.json)
 
-            // Networking with Ktor
-            implementation(libs.ktor.client.core)
-            implementation(libs.ktor.client.websockets)
-            implementation(libs.ktor.client.content.negotiation)
-            implementation(libs.ktor.serialization.kotlinx.json)
-
             // DateTime handling
             implementation(libs.kotlinx.datetime)
 
-            // Byte buffer handling
-            implementation(libs.okio)
+            // Note: Ktor and Okio removed - using native WebSocket API and custom ByteBuffer
+            // This significantly reduces WASM bundle size
         }
 
         commonTest.dependencies {
@@ -51,8 +45,7 @@ kotlin {
 
         val desktopMain by getting {
             dependencies {
-                // CIO engine for JVM desktop
-                implementation(libs.ktor.client.cio)
+                // Swing coroutines for desktop UI
                 implementation(libs.kotlinx.coroutines.swing)
             }
         }
@@ -81,7 +74,7 @@ kotlin {
             iosSimulatorArm64Main.dependsOn(this)
 
             dependencies {
-                implementation(libs.ktor.client.darwin)
+                // iOS-specific dependencies can be added here when needed
             }
         }
 

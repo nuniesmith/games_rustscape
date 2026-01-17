@@ -5,11 +5,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.*
+import androidx.compose.ui.input.pointer.PointerButton
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.*
 import androidx.compose.ui.text.font.FontFamily
@@ -103,7 +106,18 @@ data class CanvasClickEvent(
     val screenY: Float,
     val worldX: Int,
     val worldY: Int,
-    val isRightClick: Boolean = false
+    val isRightClick: Boolean = false,
+    val clickedEntity: GameEntity? = null
+)
+
+/**
+ * Entity click event with full context
+ */
+data class EntityClickEvent(
+    val entity: GameEntity,
+    val screenX: Float,
+    val screenY: Float,
+    val isRightClick: Boolean
 )
 
 /**
@@ -129,15 +143,23 @@ class GameCanvasState {
  * Main game canvas composable
  * Renders the game world, entities, and handles input
  */
+/**
+ * Main game canvas composable
+ * Renders the game world, entities, and handles input including right-click context menus
+ */
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun GameCanvas(
     gameState: GameState,
     canvasState: GameCanvasState = remember { GameCanvasState() },
+    contextMenuState: ContextMenuState = rememberContextMenuState(),
     onTileClick: (CanvasClickEvent) -> Unit = {},
-    onEntityClick: (GameEntity) -> Unit = {},
+    onEntityClick: (EntityClickEvent) -> Unit = {},
+    onEntityAction: (GameEntity, String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     val textMeasurer = rememberTextMeasurer()
+    val soundManager = LocalSoundManager.current
 
     // Animation loop
     LaunchedEffect(Unit) {
@@ -176,6 +198,155 @@ fun GameCanvas(
         listOf(localPlayer) + canvasState.entities
     }
 
+    // Entity hit detection helper
+    fun findEntityAtScreen(
+        screenPos: Offset,
+        entities: List<GameEntity>,
+        cameraX: Float,
+        cameraY: Float,
+        zoom: Float,
+        canvasWidth: Float,
+        canvasHeight: Float
+    ): GameEntity? {
+        val tileSize = GameCanvasConfig.TILE_SIZE * zoom
+
+        // Check entities in reverse order (top-most first due to painter's algorithm)
+        val sortedEntities = entities.sortedByDescending { it.position.y }
+
+        for (entity in sortedEntities) {
+            val (entityScreenX, entityScreenY) = worldToScreen(
+                entity.position.x,
+                entity.position.y,
+                cameraX,
+                cameraY,
+                zoom,
+                canvasWidth,
+                canvasHeight
+            )
+
+            // Calculate entity bounds based on type
+            val (entityWidth, entityHeight) = when (entity) {
+                is GameEntity.Player -> GameCanvasConfig.PLAYER_SIZE * zoom to GameCanvasConfig.PLAYER_SIZE * zoom
+                is GameEntity.Npc -> GameCanvasConfig.NPC_SIZE * zoom to GameCanvasConfig.NPC_SIZE * zoom
+                is GameEntity.GroundItem -> tileSize * 0.5f to tileSize * 0.5f
+                is GameEntity.GameObject -> tileSize to tileSize
+            }
+
+            // Entity center is at entityScreenX, entityScreenY (center of tile)
+            val halfWidth = entityWidth / 2
+            val halfHeight = entityHeight / 2
+
+            // Check if click is within entity bounds
+            if (screenPos.x >= entityScreenX - halfWidth &&
+                screenPos.x <= entityScreenX + halfWidth &&
+                screenPos.y >= entityScreenY - halfHeight - (entityHeight * 0.3f) && // Offset up slightly for visual center
+                screenPos.y <= entityScreenY + halfHeight
+            ) {
+                return entity
+            }
+        }
+        return null
+    }
+
+    // Build context menu options for an entity
+    fun buildContextMenuOptions(entity: GameEntity): List<ContextMenuOption> {
+        return when (entity) {
+            is GameEntity.Player -> {
+                if (entity.isLocalPlayer) {
+                    // Local player options
+                    listOf(
+                        ContextMenuOption(
+                            text = "Walk here",
+                            color = RSColors.TextYellow,
+                            onClick = { onEntityAction(entity, "walk") }
+                        )
+                    )
+                } else {
+                    RSContextMenuOptions.forPlayer(
+                        playerName = entity.name,
+                        onFollow = {
+                            soundManager?.play(RSSound.BUTTON_CLICK)
+                            onEntityAction(entity, "follow")
+                        },
+                        onTrade = {
+                            soundManager?.play(RSSound.TRADE_REQUEST)
+                            onEntityAction(entity, "trade")
+                        },
+                        onChallenge = {
+                            soundManager?.play(RSSound.BUTTON_CLICK)
+                            onEntityAction(entity, "challenge")
+                        },
+                        onReport = {
+                            soundManager?.play(RSSound.BUTTON_CLICK)
+                            onEntityAction(entity, "report")
+                        }
+                    )
+                }
+            }
+
+            is GameEntity.Npc -> {
+                RSContextMenuOptions.forNpc(
+                    npcName = entity.name,
+                    onTalk = if (entity.combatLevel == null) {
+                        {
+                            soundManager?.play(RSSound.BUTTON_CLICK)
+                            onEntityAction(entity, "talk")
+                        }
+                    } else null,
+                    onAttack = if (entity.combatLevel != null) {
+                        {
+                            soundManager?.play(RSSound.HIT_NORMAL)
+                            onEntityAction(entity, "attack")
+                        }
+                    } else null,
+                    onPickpocket = if (entity.name.contains("Man", ignoreCase = true) ||
+                        entity.name.contains("Woman", ignoreCase = true) ||
+                        entity.name.contains("Guard", ignoreCase = true)
+                    ) {
+                        {
+                            soundManager?.play(RSSound.BUTTON_CLICK)
+                            onEntityAction(entity, "pickpocket")
+                        }
+                    } else null,
+                    onExamine = {
+                        soundManager?.play(RSSound.BUTTON_CLICK)
+                        onEntityAction(entity, "examine")
+                    }
+                )
+            }
+
+            is GameEntity.GroundItem -> {
+                RSContextMenuOptions.forGroundItem(
+                    itemName = "${entity.name}${if (entity.amount > 1) " (${entity.amount})" else ""}",
+                    onTake = {
+                        soundManager?.play(RSSound.ITEM_PICKUP)
+                        onEntityAction(entity, "take")
+                    },
+                    onExamine = {
+                        soundManager?.play(RSSound.BUTTON_CLICK)
+                        onEntityAction(entity, "examine")
+                    }
+                )
+            }
+
+            is GameEntity.GameObject -> {
+                val primaryAction = getObjectPrimaryAction(entity)
+                RSContextMenuOptions.forGameObject(
+                    objectName = entity.name,
+                    primaryAction = primaryAction,
+                    onPrimaryAction = {
+                        soundManager?.play(if (primaryAction == "Open" || primaryAction == "Close") RSSound.DOOR_OPEN else RSSound.BUTTON_CLICK)
+                        onEntityAction(entity, primaryAction.lowercase())
+                    },
+                    onExamine = {
+                        soundManager?.play(RSSound.BUTTON_CLICK)
+                        onEntityAction(entity, "examine")
+                    }
+                )
+            }
+        }
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -184,6 +355,7 @@ fun GameCanvas(
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
+                // Left-click handler
                 .pointerInput(Unit) {
                     detectTapGestures { offset ->
                         val worldPos = screenToWorld(
@@ -194,15 +366,112 @@ fun GameCanvas(
                             size.width.toFloat(),
                             size.height.toFloat()
                         )
-                        canvasState.targetTile = worldPos.first to worldPos.second
-                        onTileClick(
-                            CanvasClickEvent(
-                                screenX = offset.x,
-                                screenY = offset.y,
-                                worldX = worldPos.first,
-                                worldY = worldPos.second
-                            )
+
+                        // Check if we clicked on an entity
+                        val clickedEntity = findEntityAtScreen(
+                            offset,
+                            allEntities,
+                            canvasState.cameraX,
+                            canvasState.cameraY,
+                            canvasState.zoom,
+                            size.width.toFloat(),
+                            size.height.toFloat()
                         )
+
+                        if (clickedEntity != null && clickedEntity !is GameEntity.Player) {
+                            // Left click on entity - perform primary action
+                            soundManager?.play(RSSound.BUTTON_CLICK)
+                            onEntityClick(
+                                EntityClickEvent(
+                                    entity = clickedEntity,
+                                    screenX = offset.x,
+                                    screenY = offset.y,
+                                    isRightClick = false
+                                )
+                            )
+                        } else {
+                            // Left click on ground - walk
+                            canvasState.targetTile = worldPos.first to worldPos.second
+                            onTileClick(
+                                CanvasClickEvent(
+                                    screenX = offset.x,
+                                    screenY = offset.y,
+                                    worldX = worldPos.first,
+                                    worldY = worldPos.second,
+                                    clickedEntity = clickedEntity
+                                )
+                            )
+                        }
+                    }
+                }
+                // Right-click handler for context menu
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            if (event.type == PointerEventType.Press &&
+                                event.button == PointerButton.Secondary
+                            ) {
+                                val change = event.changes.firstOrNull()
+                                if (change != null) {
+                                    val offset = change.position
+                                    val worldPos = screenToWorld(
+                                        offset,
+                                        canvasState.cameraX,
+                                        canvasState.cameraY,
+                                        canvasState.zoom,
+                                        size.width.toFloat(),
+                                        size.height.toFloat()
+                                    )
+
+                                    // Find entity at click position
+                                    val clickedEntity = findEntityAtScreen(
+                                        offset,
+                                        allEntities,
+                                        canvasState.cameraX,
+                                        canvasState.cameraY,
+                                        canvasState.zoom,
+                                        size.width.toFloat(),
+                                        size.height.toFloat()
+                                    )
+
+                                    // Build context menu options
+                                    val options = mutableListOf<ContextMenuOption>()
+
+                                    // Always add "Walk here" first
+                                    options.add(
+                                        RSContextMenuOptions.walkHere {
+                                            canvasState.targetTile = worldPos.first to worldPos.second
+                                            onTileClick(
+                                                CanvasClickEvent(
+                                                    screenX = offset.x,
+                                                    screenY = offset.y,
+                                                    worldX = worldPos.first,
+                                                    worldY = worldPos.second,
+                                                    isRightClick = true
+                                                )
+                                            )
+                                        }
+                                    )
+
+                                    // Add entity-specific options if an entity was clicked
+                                    if (clickedEntity != null) {
+                                        options.addAll(buildContextMenuOptions(clickedEntity))
+                                    }
+
+                                    // Show context menu
+                                    soundManager?.play(RSSound.BUTTON_CLICK)
+                                    contextMenuState.show(
+                                        x = offset.x,
+                                        y = offset.y,
+                                        menuOptions = options,
+                                        menuTitle = clickedEntity?.name
+                                    )
+
+                                    change.consume()
+                                }
+                            }
+                        }
                     }
                 }
         ) {
@@ -285,6 +554,35 @@ fun GameCanvas(
                 textMeasurer = textMeasurer
             )
         }
+
+        // Render context menu overlay
+        RSContextMenu(state = contextMenuState)
+    }
+}
+
+/**
+ * Get primary action for a game object based on its name/type
+ */
+private fun getObjectPrimaryAction(obj: GameEntity.GameObject): String {
+    val nameLower = obj.name.lowercase()
+    return when {
+        nameLower.contains("door") || nameLower.contains("gate") -> "Open"
+        nameLower.contains("ladder") -> "Climb"
+        nameLower.contains("stairs") -> "Climb"
+        nameLower.contains("bank") || nameLower.contains("booth") -> "Use"
+        nameLower.contains("furnace") || nameLower.contains("forge") -> "Smelt"
+        nameLower.contains("anvil") -> "Smith"
+        nameLower.contains("range") || nameLower.contains("stove") -> "Cook"
+        nameLower.contains("tree") -> "Chop down"
+        nameLower.contains("rock") || nameLower.contains("ore") -> "Mine"
+        nameLower.contains("fishing") || nameLower.contains("spot") -> "Fish"
+        nameLower.contains("altar") -> "Pray"
+        nameLower.contains("chest") -> "Open"
+        nameLower.contains("crate") || nameLower.contains("barrel") -> "Search"
+        nameLower.contains("sign") || nameLower.contains("board") -> "Read"
+        nameLower.contains("well") -> "Use"
+        nameLower.contains("fire") || nameLower.contains("campfire") -> "Use"
+        else -> "Use"
     }
 }
 
@@ -855,6 +1153,19 @@ private fun worldToScreen(
 
     return screenX to screenY
 }
+
+/**
+ * Convert world coordinates to screen coordinates (internal helper for entity detection)
+ */
+internal fun worldToScreenInternal(
+    worldX: Int,
+    worldY: Int,
+    cameraX: Float,
+    cameraY: Float,
+    zoom: Float,
+    canvasWidth: Float,
+    canvasHeight: Float
+): Pair<Float, Float> = worldToScreen(worldX, worldY, cameraX, cameraY, zoom, canvasWidth, canvasHeight)
 
 /**
  * Convert screen coordinates to world coordinates

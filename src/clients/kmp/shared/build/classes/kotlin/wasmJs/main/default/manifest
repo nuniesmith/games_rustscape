@@ -1,11 +1,11 @@
 abi_version=1.201.0
 builtins_platform=WASM
 compiler_version=2.1.0
-depends=io.ktor\:ktor-client-websockets io.ktor\:ktor-client-content-negotiation io.ktor\:ktor-client-core io.ktor\:ktor-serialization-kotlinx-json io.ktor\:ktor-events io.ktor\:ktor-websocket-serialization io.ktor\:ktor-sse io.ktor\:ktor-serialization-kotlinx io.ktor\:ktor-serialization io.ktor\:ktor-websockets io.ktor\:ktor-http io.ktor\:ktor-utils io.ktor\:ktor-io org.jetbrains.kotlinx\:kotlinx-coroutines-core org.jetbrains.kotlinx\:kotlinx-serialization-json-io org.jetbrains.kotlinx\:kotlinx-serialization-json org.jetbrains.kotlinx\:kotlinx-datetime com.squareup.okio\:okio org.jetbrains.kotlinx\:kotlinx-serialization-core org.jetbrains.kotlinx\:kotlinx-io-core org.jetbrains.kotlinx\:kotlinx-io-bytestring kotlin org.jetbrains.kotlinx\:atomicfu
+depends=org.jetbrains.kotlinx\:kotlinx-coroutines-core org.jetbrains.kotlinx\:kotlinx-serialization-json org.jetbrains.kotlinx\:kotlinx-datetime org.jetbrains.kotlinx\:kotlinx-serialization-core kotlin org.jetbrains.kotlinx\:atomicfu
 ir_signature_versions=1,2
 jsOutputName=rustscape-client-shared-wasm-js
 metadata_version=1.4.1
-serializedIrFileFingerprints=2kyqinyu2az2l.lrya3o5eceu1 xjdkhxtjrhtw.tlc39juwi7md 1tqw8jxpvnze2.2ooav9m2g96xd uf5ys1qhcafo.2xyja3qra3l9e 3v1u8fjee6qfp.33swn9fdvjko3 3nl0gcovtpte5.euifqgcubdcu 3v3a8d11v7moz.3akeq8s233d4t 37rqbyqhj2de9.1fa4ijohric7h
-serializedKlibFingerprint=2kbon3atrc8dj.86e65thb6ri7
+serializedIrFileFingerprints=2kyqinyu2az2l.lrya3o5eceu1 xjdkhxtjrhtw.tlc39juwi7md 1tqw8jxpvnze2.2ooav9m2g96xd 1zy76x0geofs1.cwdas89n3kgs fsf70k5ey72k.1rpam55ted65 3nl0gcovtpte5.euifqgcubdcu 3v3a8d11v7moz.3akeq8s233d4t 37rqbyqhj2de9.1fa4ijohric7h
+serializedKlibFingerprint=bqyq620crlhn.1qg314jnbobxu
 unique_name=com.rustscape\:shared
 wasm_targets=wasm-js

@@ -1,8 +1,12 @@
 package com.rustscape.client
 
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.window.CanvasBasedWindow
+import com.rustscape.client.audio.WebSoundManager
 import com.rustscape.client.game.GameState
 import com.rustscape.client.network.ClientConfig
 import com.rustscape.client.network.ClientEvent
@@ -10,6 +14,9 @@ import com.rustscape.client.network.ConnectionState
 import com.rustscape.client.network.GameClient
 import com.rustscape.client.ui.App
 import com.rustscape.client.ui.AppState
+import com.rustscape.client.ui.components.LocalSoundManager
+import com.rustscape.client.ui.components.PRELOAD_UI_SOUNDS
+import com.rustscape.client.ui.components.RSSound
 import kotlinx.browser.window
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -65,6 +72,18 @@ fun main() {
         canvasElementId = "gameCanvas",
         title = "Rustscape"
     ) {
+        // Initialize sound manager
+        val soundManager = remember { WebSoundManager() }
+
+        // Cleanup sound manager on dispose
+        DisposableEffect(Unit) {
+            // Preload common UI sounds
+            soundManager.preload(PRELOAD_UI_SOUNDS)
+            onDispose {
+                soundManager.dispose()
+            }
+        }
+
         // Hide loading screen once Compose is ready
         LaunchedEffect(Unit) {
             jsUpdateProgress(80, "Starting game...")
@@ -75,27 +94,30 @@ fun main() {
             jsHideLoading()
         }
 
-        App(
-            appState = appState,
-            onLogin = { username, password, rememberMe ->
-                gameClient.login(username, password)
-            },
-            onRegister = { username, email, password ->
-                // Registration would typically go through HTTP API
-                console.log("Register: $username, $email")
-                false
-            },
-            onLogout = {
-                gameClient.logout()
-            },
-            onSendChat = { message ->
-                gameClient.sendChat(message)
-            },
-            onSendCommand = { command ->
-                gameClient.sendCommand(command)
-            },
-            clientEvents = gameClient.events
-        )
+        // Provide sound manager to entire app via CompositionLocal
+        CompositionLocalProvider(LocalSoundManager provides soundManager) {
+            App(
+                appState = appState,
+                onLogin = { username, password, rememberMe ->
+                    gameClient.login(username, password)
+                },
+                onRegister = { username, email, password ->
+                    // Registration would typically go through HTTP API
+                    console.log("Register: $username, $email")
+                    false
+                },
+                onLogout = {
+                    gameClient.logout()
+                },
+                onSendChat = { message ->
+                    gameClient.sendChat(message)
+                },
+                onSendCommand = { command ->
+                    gameClient.sendCommand(command)
+                },
+                clientEvents = gameClient.events
+            )
+        }
     }
 }
 
@@ -163,7 +185,7 @@ class WebGameClient(
                     // Don't set CONNECTED here - we're not fully connected until login succeeds
                     // Keep state at CONNECTING until performLogin sets it to HANDSHAKING
                     if (continuation.isActive) {
-                        continuation.resume(true) {}
+                        continuation.resumeWith(Result.success(true))
                     }
                     Unit
                 }
@@ -176,7 +198,7 @@ class WebGameClient(
                         _events.send(ClientEvent.Disconnected)
                     }
                     if (continuation.isActive) {
-                        continuation.resume(false) {}
+                        continuation.resumeWith(Result.success(false))
                     }
                     Unit
                 }
@@ -188,7 +210,7 @@ class WebGameClient(
                         _events.send(ClientEvent.Error("WebSocket connection error"))
                     }
                     if (continuation.isActive) {
-                        continuation.resume(false) {}
+                        continuation.resumeWith(Result.success(false))
                     }
                     Unit
                 }
@@ -211,7 +233,7 @@ class WebGameClient(
                     _events.send(ClientEvent.Error("Connection failed: ${e.message}", e))
                 }
                 if (continuation.isActive) {
-                    continuation.resume(false) {}
+                    continuation.resumeWith(Result.success(false))
                 }
             }
         }
@@ -246,20 +268,24 @@ class WebGameClient(
                     console.log("[WebGameClient] Routing to onHandshakeResponse")
                     onHandshakeResponse(data)
                 }
+
                 ConnectionState.LOGGING_IN -> {
                     console.log("[WebGameClient] Routing to onLoginResponse")
                     onLoginResponse(data)
                 }
+
                 ConnectionState.CONNECTED -> {
                     console.log("[WebGameClient] Routing to processGamePacket")
                     processGamePacket(data)
                 }
+
                 ConnectionState.CONNECTING -> {
                     // Server responded while we're still connecting - treat as handshake response
                     // This can happen if the response arrives before performLogin() sets HANDSHAKING
                     console.log("[WebGameClient] Received data while CONNECTING - buffering or treating as handshake")
                     onHandshakeResponse(data)
                 }
+
                 else -> {
                     console.log("[WebGameClient] ERROR: Received data in unexpected state: $currentState")
                 }

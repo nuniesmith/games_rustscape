@@ -1,8 +1,10 @@
 package com.rustscape.client.ui.screens
 
 import androidx.compose.animation.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -12,9 +14,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusDirection
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.*
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -24,10 +30,20 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.rustscape.client.ui.theme.RustscapeColors
+import com.rustscape.client.ui.components.RSColors
+import com.rustscape.client.ui.components.RSScrollPanel
+import com.rustscape.client.ui.components.RSStoneButton
+import com.rustscape.client.ui.components.RSText
+import com.rustscape.client.ui.components.TorchFlame
+import com.rustscape.client.ui.components.RSSoundStoneButton
+import com.rustscape.client.ui.components.RSSoundCheckbox
+import com.rustscape.client.ui.components.RSErrorMessage
+import com.rustscape.client.ui.components.RSSound
+import com.rustscape.client.ui.components.LocalSoundManager
+import kotlin.random.Random
 
 /**
- * Login state for the login screen
+ * Login state data class
  */
 data class LoginState(
     val username: String = "",
@@ -39,7 +55,7 @@ data class LoginState(
 )
 
 /**
- * Login screen tabs
+ * Tab selection for login screen
  */
 enum class LoginTab {
     LOGIN,
@@ -47,20 +63,20 @@ enum class LoginTab {
 }
 
 /**
- * Registration state
+ * Register state data class
  */
 data class RegisterState(
     val username: String = "",
     val email: String = "",
     val password: String = "",
     val confirmPassword: String = "",
-    val acceptTerms: Boolean = false,
     val isLoading: Boolean = false,
     val errorMessage: String? = null
 )
 
 /**
- * Main login screen composable
+ * Classic 2008-era RuneScape Login Screen
+ * Features scroll panel design with stone buttons
  */
 @Composable
 fun LoginScreen(
@@ -86,177 +102,255 @@ fun LoginScreen(
     }
 
     Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        RustscapeColors.BackgroundDark,
-                        RustscapeColors.Background,
-                        RustscapeColors.BackgroundDark
-                    )
-                )
-            ),
+        modifier = modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
     ) {
+        // Atmospheric background
+        LoginBackground()
+
+        // Left torch
+        TorchFlame(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .padding(start = 60.dp)
+                .offset(y = (-50).dp),
+            flameWidth = 50.dp,
+            flameHeight = 100.dp,
+            intensity = 0.9f
+        )
+
+        // Right torch
+        TorchFlame(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(end = 60.dp)
+                .offset(y = (-50).dp),
+            flameWidth = 50.dp,
+            flameHeight = 100.dp,
+            intensity = 0.9f
+        )
+
+        // Main content
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
             modifier = Modifier.padding(16.dp)
         ) {
-            // Game title
-            GameTitle()
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            // Login card
-            LoginCard(
-                loginState = loginState,
-                registerState = registerState,
-                onLoginStateChange = { loginState = it },
-                onRegisterStateChange = { registerState = it },
-                onLogin = onLogin,
-                onRegister = onRegister
-            )
-        }
-    }
-}
-
-/**
- * Game title header
- */
-@Composable
-private fun GameTitle() {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(
-            text = "RUSTSCAPE",
-            fontSize = 48.sp,
-            fontWeight = FontWeight.Bold,
-            color = RustscapeColors.TextGold,
-            letterSpacing = 4.sp
-        )
-        Text(
-            text = "A RuneScape-Inspired Adventure",
-            fontSize = 14.sp,
-            color = RustscapeColors.TextSecondary,
-            letterSpacing = 2.sp
-        )
-    }
-}
-
-/**
- * Main login card containing tabs and forms
- */
-@Composable
-private fun LoginCard(
-    loginState: LoginState,
-    registerState: RegisterState,
-    onLoginStateChange: (LoginState) -> Unit,
-    onRegisterStateChange: (RegisterState) -> Unit,
-    onLogin: (String, String, Boolean) -> Unit,
-    onRegister: (String, String, String) -> Unit
-) {
-    Card(
-        modifier = Modifier
-            .width(400.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .border(
-                width = 2.dp,
-                color = RustscapeColors.Border,
-                shape = RoundedCornerShape(8.dp)
-            ),
-        colors = CardDefaults.cardColors(
-            containerColor = RustscapeColors.PanelBackground
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            // Tab buttons
-            TabRow(loginState.selectedTab, onLoginStateChange, loginState)
+            // Game logo/title
+            GameLogo()
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Animated content switch between login and register
-            AnimatedContent(
-                targetState = loginState.selectedTab,
-                transitionSpec = {
-                    fadeIn() + slideInHorizontally { if (targetState == LoginTab.LOGIN) -it else it } togetherWith
-                            fadeOut() + slideOutHorizontally { if (targetState == LoginTab.LOGIN) it else -it }
-                },
-                label = "tab_content"
-            ) { tab ->
-                when (tab) {
-                    LoginTab.LOGIN -> LoginForm(
-                        state = loginState,
-                        onStateChange = onLoginStateChange,
-                        onSubmit = onLogin
-                    )
+            // Scroll panel with login form
+            RSScrollPanel(
+                modifier = Modifier.width(320.dp)
+            ) {
+                // Welcome text
+                RSText(
+                    text = "Welcome to Rustscape",
+                    color = RSColors.TextBrown,
+                    fontSize = 18,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
 
-                    LoginTab.REGISTER -> RegisterForm(
-                        state = registerState,
-                        onStateChange = onRegisterStateChange,
-                        onSubmit = onRegister
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // Tab selector
+                LoginTabSelector(
+                    selectedTab = loginState.selectedTab,
+                    onTabSelected = { tab ->
+                        loginState = loginState.copy(selectedTab = tab, errorMessage = null)
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Animated content switch
+                AnimatedContent(
+                    targetState = loginState.selectedTab,
+                    transitionSpec = {
+                        fadeIn() togetherWith fadeOut()
+                    },
+                    label = "login_tab_content"
+                ) { tab ->
+                    when (tab) {
+                        LoginTab.LOGIN -> LoginForm(
+                            state = loginState,
+                            onStateChange = { loginState = it },
+                            onSubmit = onLogin
+                        )
+
+                        LoginTab.REGISTER -> RegisterForm(
+                            state = registerState,
+                            onStateChange = { registerState = it },
+                            onSubmit = onRegister
+                        )
+                    }
+                }
+
+                // Error message display
+                loginState.errorMessage?.let { error ->
+                    Spacer(modifier = Modifier.height(12.dp))
+                    RSText(
+                        text = error,
+                        color = RSColors.TextRed,
+                        fontSize = 12,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                // Loading indicator
+                if (loginState.isLoading) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        color = RSColors.GoldMid,
+                        strokeWidth = 2.dp
                     )
                 }
             }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // World selector (decorative for now)
+            WorldSelector()
         }
     }
 }
 
 /**
- * Tab row for switching between login and register
+ * Atmospheric dark background with torch effects
  */
 @Composable
-private fun TabRow(
-    selectedTab: LoginTab,
-    onLoginStateChange: (LoginState) -> Unit,
-    loginState: LoginState
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        TabButton(
-            text = "Login",
-            isSelected = selectedTab == LoginTab.LOGIN,
-            onClick = { onLoginStateChange(loginState.copy(selectedTab = LoginTab.LOGIN, errorMessage = null)) },
-            modifier = Modifier.weight(1f)
+private fun LoginBackground() {
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        // Dark gradient background
+        drawRect(
+            brush = Brush.verticalGradient(
+                colors = listOf(
+                    Color(0xFF1A0A1A),
+                    Color(0xFF0D0D1A),
+                    Color(0xFF050510),
+                    Color(0xFF0D0D1A),
+                    Color(0xFF1A0A1A)
+                )
+            )
         )
-        TabButton(
-            text = "Register",
-            isSelected = selectedTab == LoginTab.REGISTER,
-            onClick = { onLoginStateChange(loginState.copy(selectedTab = LoginTab.REGISTER, errorMessage = null)) },
-            modifier = Modifier.weight(1f)
+
+        // Add some atmospheric particles/stars
+        val random = Random(42)
+        for (i in 0 until 100) {
+            val x = random.nextFloat() * size.width
+            val y = random.nextFloat() * size.height
+            val alpha = random.nextFloat() * 0.5f + 0.1f
+            val starSize = random.nextFloat() * 2f + 0.5f
+            drawCircle(
+                color = Color.White.copy(alpha = alpha),
+                radius = starSize,
+                center = Offset(x, y)
+            )
+        }
+
+        // Vignette effect
+        drawRect(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    Color.Transparent,
+                    Color.Black.copy(alpha = 0.7f)
+                ),
+                center = Offset(size.width / 2, size.height / 2),
+                radius = maxOf(size.width, size.height) * 0.7f
+            )
         )
     }
 }
 
 /**
- * Individual tab button
+ * Classic RuneScape-style game logo
  */
 @Composable
-private fun TabButton(
-    text: String,
-    isSelected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Button(
-        onClick = onClick,
-        modifier = modifier.height(40.dp),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = if (isSelected) RustscapeColors.Primary else RustscapeColors.SurfaceVariant,
-            contentColor = if (isSelected) RustscapeColors.OnPrimary else RustscapeColors.TextSecondary
-        ),
-        shape = RoundedCornerShape(4.dp)
+private fun GameLogo() {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(
-            text = text,
-            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+        // Main title with stone letter effect
+        Box {
+            // Shadow
+            Text(
+                text = "RUSTSCAPE",
+                fontSize = 52.sp,
+                fontWeight = FontWeight.Black,
+                color = Color.Black,
+                letterSpacing = 4.sp,
+                modifier = Modifier.offset(3.dp, 3.dp)
+            )
+            // Stone gradient text
+            Text(
+                text = "RUSTSCAPE",
+                fontSize = 52.sp,
+                fontWeight = FontWeight.Black,
+                style = LocalTextStyle.current.copy(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xFFD4D4D4),
+                            Color(0xFF9A9A9A),
+                            Color(0xFF6A6A6A),
+                            Color(0xFF9A9A9A)
+                        )
+                    )
+                ),
+                letterSpacing = 4.sp
+            )
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        // Subtitle
+        RSText(
+            text = "A RuneScape-Inspired Adventure",
+            color = RSColors.GoldMid,
+            fontSize = 14,
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+/**
+ * Tab selector for login/register
+ */
+@Composable
+private fun LoginTabSelector(
+    selectedTab: LoginTab,
+    onTabSelected: (LoginTab) -> Unit
+) {
+    val soundManager = LocalSoundManager.current
+
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        RSSoundStoneButton(
+            text = "Login",
+            onClick = { onTabSelected(LoginTab.LOGIN) },
+            modifier = Modifier.weight(1f),
+            enabled = selectedTab != LoginTab.LOGIN,
+            width = 130.dp,
+            height = 32.dp,
+            clickSound = RSSound.TAB_SWITCH
+        )
+        RSSoundStoneButton(
+            text = "Register",
+            onClick = { onTabSelected(LoginTab.REGISTER) },
+            modifier = Modifier.weight(1f),
+            enabled = selectedTab != LoginTab.REGISTER,
+            width = 130.dp,
+            height = 32.dp,
+            clickSound = RSSound.TAB_SWITCH
         )
     }
 }
@@ -274,14 +368,14 @@ private fun LoginForm(
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxWidth()
     ) {
         // Username field
-        RustscapeTextField(
+        RSTextField(
             value = state.username,
-            onValueChange = { onStateChange(state.copy(username = it, errorMessage = null)) },
+            onValueChange = { onStateChange(state.copy(username = it)) },
             label = "Username",
-            enabled = !state.isLoading,
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Text,
                 imeAction = ImeAction.Next
@@ -292,12 +386,11 @@ private fun LoginForm(
         )
 
         // Password field
-        RustscapeTextField(
+        RSTextField(
             value = state.password,
-            onValueChange = { onStateChange(state.copy(password = it, errorMessage = null)) },
+            onValueChange = { onStateChange(state.copy(password = it)) },
             label = "Password",
             isPassword = true,
-            enabled = !state.isLoading,
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Password,
                 imeAction = ImeAction.Done
@@ -312,51 +405,34 @@ private fun LoginForm(
             )
         )
 
-        // Remember me checkbox
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Checkbox(
-                checked = state.rememberMe,
-                onCheckedChange = { onStateChange(state.copy(rememberMe = it)) },
-                enabled = !state.isLoading,
-                colors = CheckboxDefaults.colors(
-                    checkedColor = RustscapeColors.Primary,
-                    uncheckedColor = RustscapeColors.TextMuted
-                )
-            )
-            Text(
-                text = "Remember me",
-                color = RustscapeColors.TextSecondary,
-                fontSize = 14.sp
-            )
-        }
+        // Remember me checkbox with sound
+        RSSoundCheckbox(
+            checked = state.rememberMe,
+            onCheckedChange = { onStateChange(state.copy(rememberMe = it)) },
+            label = "Remember me",
+            modifier = Modifier.padding(4.dp)
+        )
 
-        // Error message
-        AnimatedVisibility(visible = state.errorMessage != null) {
-            Text(
-                text = state.errorMessage ?: "",
-                color = RustscapeColors.Error,
-                fontSize = 14.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
+        Spacer(modifier = Modifier.height(8.dp))
 
-        // Login button
-        RustscapeButton(
-            text = if (state.isLoading) "Logging in..." else "Login",
-            onClick = { onSubmit(state.username, state.password, state.rememberMe) },
+        // Login button with sound
+        RSSoundStoneButton(
+            text = if (state.isLoading) "Logging in..." else "Log In",
+            onClick = {
+                if (state.username.isNotBlank() && state.password.isNotBlank()) {
+                    onSubmit(state.username, state.password, state.rememberMe)
+                }
+            },
             enabled = !state.isLoading && state.username.isNotBlank() && state.password.isNotBlank(),
-            isLoading = state.isLoading,
-            modifier = Modifier.fillMaxWidth()
+            width = 180.dp,
+            height = 40.dp,
+            clickSound = RSSound.LOGIN_CLICK
         )
     }
 }
 
 /**
- * Registration form
+ * Register form
  */
 @Composable
 private fun RegisterForm(
@@ -365,21 +441,22 @@ private fun RegisterForm(
     onSubmit: (String, String, String) -> Unit
 ) {
     val focusManager = LocalFocusManager.current
-
-    // Password strength calculation
-    val passwordStrength = calculatePasswordStrength(state.password)
-    val passwordsMatch = state.password == state.confirmPassword && state.password.isNotEmpty()
+    val passwordsMatch = state.password == state.confirmPassword && state.password.isNotBlank()
+    val canRegister = state.username.isNotBlank() &&
+            state.email.isNotBlank() &&
+            state.password.length >= 6 &&
+            passwordsMatch
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxWidth()
     ) {
         // Username field
-        RustscapeTextField(
+        RSTextField(
             value = state.username,
-            onValueChange = { onStateChange(state.copy(username = it, errorMessage = null)) },
+            onValueChange = { onStateChange(state.copy(username = it)) },
             label = "Username",
-            enabled = !state.isLoading,
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Text,
                 imeAction = ImeAction.Next
@@ -390,11 +467,10 @@ private fun RegisterForm(
         )
 
         // Email field
-        RustscapeTextField(
+        RSTextField(
             value = state.email,
-            onValueChange = { onStateChange(state.copy(email = it, errorMessage = null)) },
+            onValueChange = { onStateChange(state.copy(email = it)) },
             label = "Email",
-            enabled = !state.isLoading,
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Email,
                 imeAction = ImeAction.Next
@@ -404,38 +480,27 @@ private fun RegisterForm(
             )
         )
 
-        // Password field with strength indicator
-        Column {
-            RustscapeTextField(
-                value = state.password,
-                onValueChange = { onStateChange(state.copy(password = it, errorMessage = null)) },
-                label = "Password",
-                isPassword = true,
-                enabled = !state.isLoading,
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Password,
-                    imeAction = ImeAction.Next
-                ),
-                keyboardActions = KeyboardActions(
-                    onNext = { focusManager.moveFocus(FocusDirection.Down) }
-                )
+        // Password field
+        RSTextField(
+            value = state.password,
+            onValueChange = { onStateChange(state.copy(password = it)) },
+            label = "Password (min 6 chars)",
+            isPassword = true,
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Password,
+                imeAction = ImeAction.Next
+            ),
+            keyboardActions = KeyboardActions(
+                onNext = { focusManager.moveFocus(FocusDirection.Down) }
             )
-
-            // Password strength bar
-            if (state.password.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(4.dp))
-                PasswordStrengthIndicator(strength = passwordStrength)
-            }
-        }
+        )
 
         // Confirm password field
-        RustscapeTextField(
+        RSTextField(
             value = state.confirmPassword,
-            onValueChange = { onStateChange(state.copy(confirmPassword = it, errorMessage = null)) },
+            onValueChange = { onStateChange(state.copy(confirmPassword = it)) },
             label = "Confirm Password",
             isPassword = true,
-            enabled = !state.isLoading,
-            isError = state.confirmPassword.isNotEmpty() && !passwordsMatch,
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Password,
                 imeAction = ImeAction.Done
@@ -443,213 +508,123 @@ private fun RegisterForm(
             keyboardActions = KeyboardActions(
                 onDone = {
                     focusManager.clearFocus()
-                    if (canRegister(state)) {
+                    if (canRegister) {
                         onSubmit(state.username, state.email, state.password)
                     }
                 }
             )
         )
 
-        // Terms checkbox
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Checkbox(
-                checked = state.acceptTerms,
-                onCheckedChange = { onStateChange(state.copy(acceptTerms = it)) },
-                enabled = !state.isLoading,
-                colors = CheckboxDefaults.colors(
-                    checkedColor = RustscapeColors.Primary,
-                    uncheckedColor = RustscapeColors.TextMuted
-                )
-            )
-            Text(
-                text = "I accept the Terms of Service",
-                color = RustscapeColors.TextSecondary,
-                fontSize = 14.sp
+        // Password match indicator
+        if (state.confirmPassword.isNotBlank()) {
+            RSText(
+                text = if (passwordsMatch) "✓ Passwords match" else "✗ Passwords do not match",
+                color = if (passwordsMatch) RSColors.TextGreen else RSColors.TextRed,
+                fontSize = 11
             )
         }
 
-        // Error message
-        AnimatedVisibility(visible = state.errorMessage != null) {
-            Text(
-                text = state.errorMessage ?: "",
-                color = RustscapeColors.Error,
-                fontSize = 14.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
+        Spacer(modifier = Modifier.height(4.dp))
 
-        // Register button
-        RustscapeButton(
-            text = if (state.isLoading) "Creating Account..." else "Create Account",
-            onClick = { onSubmit(state.username, state.email, state.password) },
-            enabled = !state.isLoading && canRegister(state),
-            isLoading = state.isLoading,
-            modifier = Modifier.fillMaxWidth()
+        // Register button with sound
+        RSSoundStoneButton(
+            text = if (state.isLoading) "Creating..." else "Create Account",
+            onClick = {
+                if (canRegister) {
+                    onSubmit(state.username, state.email, state.password)
+                }
+            },
+            enabled = !state.isLoading && canRegister,
+            width = 180.dp,
+            height = 40.dp,
+            clickSound = RSSound.LOGIN_CLICK
         )
     }
 }
 
 /**
- * Custom styled text field for Rustscape
+ * Classic RS-style text field
  */
 @Composable
-private fun RustscapeTextField(
+private fun RSTextField(
     value: String,
     onValueChange: (String) -> Unit,
     label: String,
     modifier: Modifier = Modifier,
     isPassword: Boolean = false,
-    enabled: Boolean = true,
-    isError: Boolean = false,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     keyboardActions: KeyboardActions = KeyboardActions.Default
 ) {
-    var passwordVisible by remember { mutableStateOf(false) }
-
-    OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
-        label = { Text(label) },
-        modifier = modifier.fillMaxWidth(),
-        enabled = enabled,
-        isError = isError,
-        singleLine = true,
-        visualTransformation = if (isPassword && !passwordVisible) {
-            PasswordVisualTransformation()
-        } else {
-            VisualTransformation.None
-        },
-        keyboardOptions = keyboardOptions,
-        keyboardActions = keyboardActions,
-        colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = RustscapeColors.Primary,
-            unfocusedBorderColor = RustscapeColors.Border,
-            focusedLabelColor = RustscapeColors.Primary,
-            unfocusedLabelColor = RustscapeColors.TextMuted,
-            cursorColor = RustscapeColors.Primary,
-            focusedTextColor = RustscapeColors.TextWhite,
-            unfocusedTextColor = RustscapeColors.TextSecondary,
-            errorBorderColor = RustscapeColors.Error,
-            errorLabelColor = RustscapeColors.Error
-        ),
-        shape = RoundedCornerShape(4.dp)
-    )
-}
-
-/**
- * Custom styled button for Rustscape
- */
-@Composable
-private fun RustscapeButton(
-    text: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    isLoading: Boolean = false
-) {
-    Button(
-        onClick = onClick,
-        modifier = modifier.height(48.dp),
-        enabled = enabled && !isLoading,
-        colors = ButtonDefaults.buttonColors(
-            containerColor = RustscapeColors.Primary,
-            contentColor = RustscapeColors.OnPrimary,
-            disabledContainerColor = RustscapeColors.SurfaceVariant,
-            disabledContentColor = RustscapeColors.TextMuted
-        ),
-        shape = RoundedCornerShape(4.dp)
-    ) {
-        if (isLoading) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(20.dp),
-                color = RustscapeColors.OnPrimary,
-                strokeWidth = 2.dp
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-        }
-        Text(
-            text = text,
-            fontWeight = FontWeight.Bold,
-            fontSize = 16.sp
-        )
-    }
-}
-
-/**
- * Password strength indicator bar
- */
-@Composable
-private fun PasswordStrengthIndicator(strength: PasswordStrength) {
-    Column {
-        LinearProgressIndicator(
-            progress = { strength.progress },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(4.dp)
-                .clip(RoundedCornerShape(2.dp)),
-            color = strength.color,
-            trackColor = RustscapeColors.SurfaceVariant
+    Column(modifier = modifier.fillMaxWidth()) {
+        RSText(
+            text = label,
+            color = RSColors.TextBrown,
+            fontSize = 12,
+            fontWeight = FontWeight.Medium
         )
         Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = strength.label,
-            color = strength.color,
-            fontSize = 12.sp
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp),
+            singleLine = true,
+            visualTransformation = if (isPassword) PasswordVisualTransformation() else VisualTransformation.None,
+            keyboardOptions = keyboardOptions,
+            keyboardActions = keyboardActions,
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = RSColors.TextBrown,
+                unfocusedTextColor = RSColors.TextBrown,
+                cursorColor = RSColors.GoldMid,
+                focusedBorderColor = RSColors.GoldMid,
+                unfocusedBorderColor = RSColors.ScrollBorder,
+                focusedContainerColor = RSColors.ScrollLight.copy(alpha = 0.3f),
+                unfocusedContainerColor = RSColors.ScrollLight.copy(alpha = 0.2f)
+            ),
+            shape = RoundedCornerShape(4.dp),
+            textStyle = LocalTextStyle.current.copy(fontSize = 14.sp)
         )
     }
 }
 
 /**
- * Password strength data class
+ * World selector display (decorative)
  */
-data class PasswordStrength(
-    val progress: Float,
-    val label: String,
-    val color: Color
-)
-
-/**
- * Calculate password strength
- */
-private fun calculatePasswordStrength(password: String): PasswordStrength {
-    if (password.isEmpty()) {
-        return PasswordStrength(0f, "", RustscapeColors.TextMuted)
+@Composable
+private fun WorldSelector() {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+        modifier = Modifier
+            .background(
+                color = Color.Black.copy(alpha = 0.6f),
+                shape = RoundedCornerShape(4.dp)
+            )
+            .border(
+                width = 1.dp,
+                color = RSColors.GoldDark,
+                shape = RoundedCornerShape(4.dp)
+            )
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        RSText(
+            text = "World 1",
+            color = RSColors.TextYellow,
+            fontSize = 14,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(modifier = Modifier.width(16.dp))
+        RSText(
+            text = "●",
+            color = RSColors.TextGreen,
+            fontSize = 10
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        RSText(
+            text = "Online",
+            color = RSColors.TextGreen,
+            fontSize = 12
+        )
     }
-
-    var score = 0
-
-    // Length scoring
-    when {
-        password.length >= 12 -> score += 3
-        password.length >= 8 -> score += 2
-        password.length >= 6 -> score += 1
-    }
-
-    // Character variety scoring
-    if (password.any { it.isUpperCase() }) score++
-    if (password.any { it.isLowerCase() }) score++
-    if (password.any { it.isDigit() }) score++
-    if (password.any { !it.isLetterOrDigit() }) score++
-
-    return when {
-        score >= 6 -> PasswordStrength(1f, "Strong", RustscapeColors.Success)
-        score >= 4 -> PasswordStrength(0.66f, "Medium", RustscapeColors.Warning)
-        score >= 2 -> PasswordStrength(0.33f, "Weak", RustscapeColors.Error)
-        else -> PasswordStrength(0.15f, "Very Weak", RustscapeColors.Error)
-    }
-}
-
-/**
- * Check if registration form is valid
- */
-private fun canRegister(state: RegisterState): Boolean {
-    return state.username.length >= 3 &&
-            state.email.contains("@") &&
-            state.password.length >= 6 &&
-            state.password == state.confirmPassword &&
-            state.acceptTerms
 }
