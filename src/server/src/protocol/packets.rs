@@ -105,6 +105,293 @@ pub trait OutgoingPacket {
     }
 }
 
+// ============ Bank Packets ============
+
+/// Bank close packet (opcode 185)
+#[derive(Debug, Clone, Default)]
+pub struct BankClosePacket;
+
+impl IncomingPacket for BankClosePacket {
+    const OPCODE: u8 = 185;
+    const SIZE: PacketSize = PacketSize::Fixed(0);
+
+    fn decode(_buffer: &mut PacketBuffer) -> Result<Self, PacketDecodeError> {
+        Ok(Self)
+    }
+}
+
+/// Bank withdraw packet (opcode 43)
+#[derive(Debug, Clone)]
+pub struct BankWithdrawPacket {
+    pub slot: u16,
+    pub item_id: u16,
+    pub amount: u32,
+    pub as_note: bool,
+}
+
+impl IncomingPacket for BankWithdrawPacket {
+    const OPCODE: u8 = 43;
+    const SIZE: PacketSize = PacketSize::Fixed(11);
+
+    fn decode(buffer: &mut PacketBuffer) -> Result<Self, PacketDecodeError> {
+        if buffer.remaining() < 11 {
+            return Err(PacketDecodeError::InsufficientData {
+                expected: 11,
+                actual: buffer.remaining(),
+            });
+        }
+        Ok(Self {
+            slot: buffer.read_ushort_le(),
+            item_id: buffer.read_ushort_le(),
+            amount: buffer.read_uint(),
+            as_note: buffer.read_ubyte() == 1,
+        })
+    }
+}
+
+/// Bank deposit packet (opcode 233)
+#[derive(Debug, Clone)]
+pub struct BankDepositPacket {
+    pub inventory_slot: u16,
+    pub item_id: u16,
+    pub amount: u32,
+}
+
+impl IncomingPacket for BankDepositPacket {
+    const OPCODE: u8 = 233;
+    const SIZE: PacketSize = PacketSize::Fixed(8);
+
+    fn decode(buffer: &mut PacketBuffer) -> Result<Self, PacketDecodeError> {
+        if buffer.remaining() < 8 {
+            return Err(PacketDecodeError::InsufficientData {
+                expected: 8,
+                actual: buffer.remaining(),
+            });
+        }
+        Ok(Self {
+            inventory_slot: buffer.read_ushort_le(),
+            item_id: buffer.read_ushort_le(),
+            amount: buffer.read_uint(),
+        })
+    }
+}
+
+/// Bank deposit all inventory packet (opcode 129)
+#[derive(Debug, Clone, Default)]
+pub struct BankDepositAllPacket;
+
+impl IncomingPacket for BankDepositAllPacket {
+    const OPCODE: u8 = 129;
+    const SIZE: PacketSize = PacketSize::Fixed(0);
+
+    fn decode(_buffer: &mut PacketBuffer) -> Result<Self, PacketDecodeError> {
+        Ok(Self)
+    }
+}
+
+/// Bank deposit equipment packet (opcode 195)
+#[derive(Debug, Clone, Default)]
+pub struct BankDepositEquipmentPacket;
+
+impl IncomingPacket for BankDepositEquipmentPacket {
+    const OPCODE: u8 = 195;
+    const SIZE: PacketSize = PacketSize::Fixed(0);
+
+    fn decode(_buffer: &mut PacketBuffer) -> Result<Self, PacketDecodeError> {
+        Ok(Self)
+    }
+}
+
+/// Bank tab select packet (opcode 55)
+#[derive(Debug, Clone)]
+pub struct BankTabSelectPacket {
+    pub tab: u8,
+}
+
+impl IncomingPacket for BankTabSelectPacket {
+    const OPCODE: u8 = 55;
+    const SIZE: PacketSize = PacketSize::Fixed(1);
+
+    fn decode(buffer: &mut PacketBuffer) -> Result<Self, PacketDecodeError> {
+        if buffer.remaining() < 1 {
+            return Err(PacketDecodeError::InsufficientData {
+                expected: 1,
+                actual: buffer.remaining(),
+            });
+        }
+        Ok(Self {
+            tab: buffer.read_ubyte(),
+        })
+    }
+}
+
+/// Bank move item packet (opcode 214)
+#[derive(Debug, Clone)]
+pub struct BankMoveItemPacket {
+    pub from_slot: u16,
+    pub to_slot: u16,
+    pub mode: u8, // 0 = swap, 1 = insert
+}
+
+impl IncomingPacket for BankMoveItemPacket {
+    const OPCODE: u8 = 214;
+    const SIZE: PacketSize = PacketSize::Fixed(5);
+
+    fn decode(buffer: &mut PacketBuffer) -> Result<Self, PacketDecodeError> {
+        if buffer.remaining() < 5 {
+            return Err(PacketDecodeError::InsufficientData {
+                expected: 5,
+                actual: buffer.remaining(),
+            });
+        }
+        Ok(Self {
+            from_slot: buffer.read_ushort_le(),
+            to_slot: buffer.read_ushort_le(),
+            mode: buffer.read_ubyte(),
+        })
+    }
+}
+
+/// Bank search packet (opcode 116)
+#[derive(Debug, Clone)]
+pub struct BankSearchPacket {
+    pub query: String,
+}
+
+impl IncomingPacket for BankSearchPacket {
+    const OPCODE: u8 = 116;
+    const SIZE: PacketSize = PacketSize::VariableByte;
+
+    fn decode(buffer: &mut PacketBuffer) -> Result<Self, PacketDecodeError> {
+        Ok(Self {
+            query: buffer.read_string(),
+        })
+    }
+}
+
+/// Bank note mode packet (opcode 117)
+#[derive(Debug, Clone)]
+pub struct BankNoteModePacket {
+    pub enabled: bool,
+}
+
+impl IncomingPacket for BankNoteModePacket {
+    const OPCODE: u8 = 117;
+    const SIZE: PacketSize = PacketSize::Fixed(1);
+
+    fn decode(buffer: &mut PacketBuffer) -> Result<Self, PacketDecodeError> {
+        if buffer.remaining() < 1 {
+            return Err(PacketDecodeError::InsufficientData {
+                expected: 1,
+                actual: buffer.remaining(),
+            });
+        }
+        Ok(Self {
+            enabled: buffer.read_ubyte() == 1,
+        })
+    }
+}
+
+/// Bank withdraw mode packet (opcode 115)
+#[derive(Debug, Clone)]
+pub struct BankWithdrawModePacket {
+    pub mode: u8, // 0=1, 1=5, 2=10, 3=X, 4=All
+}
+
+impl IncomingPacket for BankWithdrawModePacket {
+    const OPCODE: u8 = 115;
+    const SIZE: PacketSize = PacketSize::Fixed(1);
+
+    fn decode(buffer: &mut PacketBuffer) -> Result<Self, PacketDecodeError> {
+        if buffer.remaining() < 1 {
+            return Err(PacketDecodeError::InsufficientData {
+                expected: 1,
+                actual: buffer.remaining(),
+            });
+        }
+        Ok(Self {
+            mode: buffer.read_ubyte(),
+        })
+    }
+}
+
+// ============ Inventory Packets ============
+
+/// Item drop packet (opcode 145)
+#[derive(Debug, Clone)]
+pub struct ItemDropPacket {
+    pub slot: u16,
+    pub item_id: u16,
+}
+
+impl IncomingPacket for ItemDropPacket {
+    const OPCODE: u8 = 145;
+    const SIZE: PacketSize = PacketSize::Fixed(4);
+
+    fn decode(buffer: &mut PacketBuffer) -> Result<Self, PacketDecodeError> {
+        if buffer.remaining() < 4 {
+            return Err(PacketDecodeError::InsufficientData {
+                expected: 4,
+                actual: buffer.remaining(),
+            });
+        }
+        Ok(Self {
+            slot: buffer.read_ushort_le(),
+            item_id: buffer.read_ushort_le(),
+        })
+    }
+}
+
+/// Item equip packet (opcode 41)
+#[derive(Debug, Clone)]
+pub struct ItemEquipPacket {
+    pub slot: u16,
+    pub item_id: u16,
+}
+
+impl IncomingPacket for ItemEquipPacket {
+    const OPCODE: u8 = 41;
+    const SIZE: PacketSize = PacketSize::Fixed(4);
+
+    fn decode(buffer: &mut PacketBuffer) -> Result<Self, PacketDecodeError> {
+        if buffer.remaining() < 4 {
+            return Err(PacketDecodeError::InsufficientData {
+                expected: 4,
+                actual: buffer.remaining(),
+            });
+        }
+        Ok(Self {
+            slot: buffer.read_ushort_le(),
+            item_id: buffer.read_ushort_le(),
+        })
+    }
+}
+
+/// Inventory swap packet (opcode 214 - same as bank move, distinguished by context)
+#[derive(Debug, Clone)]
+pub struct InventorySwapPacket {
+    pub from_slot: u16,
+    pub to_slot: u16,
+}
+
+impl IncomingPacket for InventorySwapPacket {
+    const OPCODE: u8 = 243; // Different opcode for inventory swap
+    const SIZE: PacketSize = PacketSize::Fixed(4);
+
+    fn decode(buffer: &mut PacketBuffer) -> Result<Self, PacketDecodeError> {
+        if buffer.remaining() < 4 {
+            return Err(PacketDecodeError::InsufficientData {
+                expected: 4,
+                actual: buffer.remaining(),
+            });
+        }
+        Ok(Self {
+            from_slot: buffer.read_ushort_le(),
+            to_slot: buffer.read_ushort_le(),
+        })
+    }
+}
+
 /// Packet decode error
 #[derive(Debug, Clone)]
 pub enum PacketDecodeError {
@@ -396,17 +683,28 @@ pub fn incoming_packet_sizes() -> &'static HashMap<u8, PacketSize> {
         map.insert(17, PacketSize::Fixed(2)); // NPC examine
         map.insert(21, PacketSize::Fixed(2)); // Item examine
         map.insert(39, PacketSize::Fixed(6)); // Object action 1
-        map.insert(41, PacketSize::Fixed(6)); // NPC action 1
+        map.insert(41, PacketSize::Fixed(4)); // Item equip
+        map.insert(43, PacketSize::Fixed(11)); // Bank withdraw
         map.insert(52, PacketSize::VariableByte); // Command
+        map.insert(55, PacketSize::Fixed(1)); // Bank tab select
         map.insert(77, PacketSize::Fixed(0)); // Map region loaded
         map.insert(86, PacketSize::Fixed(4)); // Mouse click
         map.insert(98, PacketSize::Fixed(8)); // Walk here
+        map.insert(115, PacketSize::Fixed(1)); // Bank withdraw mode
+        map.insert(116, PacketSize::VariableByte); // Bank search
+        map.insert(117, PacketSize::Fixed(1)); // Bank note mode
         map.insert(121, PacketSize::VariableByte); // Mouse movement
+        map.insert(129, PacketSize::Fixed(0)); // Bank deposit all
+        map.insert(145, PacketSize::Fixed(4)); // Item drop
         map.insert(150, PacketSize::Fixed(6)); // Item action 1
         map.insert(164, PacketSize::Fixed(2)); // Button click
-        map.insert(185, PacketSize::Fixed(4)); // Widget action
+        map.insert(185, PacketSize::Fixed(0)); // Bank close
+        map.insert(195, PacketSize::Fixed(0)); // Bank deposit equipment
         map.insert(210, PacketSize::Fixed(0)); // Close interface
+        map.insert(214, PacketSize::Fixed(5)); // Bank move item
+        map.insert(233, PacketSize::Fixed(8)); // Bank deposit
         map.insert(236, PacketSize::Fixed(6)); // Ground item action
+        map.insert(243, PacketSize::Fixed(4)); // Inventory swap
 
         map
     })
@@ -447,10 +745,10 @@ mod tests {
 
     #[test]
     fn test_keepalive_decode() {
-            let mut buffer = PacketBuffer::new();
-            let _packet = KeepAlivePacket::decode(&mut buffer).unwrap();
-            assert_eq!(KeepAlivePacket::OPCODE, 0);
-        }
+        let mut buffer = PacketBuffer::new();
+        let _packet = KeepAlivePacket::decode(&mut buffer).unwrap();
+        assert_eq!(KeepAlivePacket::OPCODE, 0);
+    }
 
     #[test]
     fn test_focus_change_decode() {

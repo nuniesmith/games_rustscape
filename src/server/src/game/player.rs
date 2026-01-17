@@ -15,6 +15,9 @@ use tracing::{debug, info};
 use uuid::Uuid;
 
 use crate::error::{GameError, Result, RustscapeError};
+use crate::game::bank::Bank;
+use crate::game::equipment::Equipment;
+use crate::game::inventory::Inventory;
 use crate::game::persistence::{
     Appearance as PersistenceAppearance, PlayerData, Position, Skill as PersistenceSkill,
 };
@@ -64,7 +67,7 @@ impl PlayerRights {
 }
 
 /// Player location in the game world
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Location {
     /// X coordinate
     pub x: u16,
@@ -386,6 +389,14 @@ pub struct Player {
     pub running: RwLock<bool>,
     /// Last activity timestamp (tick number)
     pub last_activity: AtomicU64,
+    /// Player bank storage
+    pub bank: RwLock<Bank>,
+    /// Whether the bank interface is currently open
+    pub bank_open: RwLock<bool>,
+    /// Player inventory
+    pub inventory: RwLock<Inventory>,
+    /// Player equipment
+    pub equipment: RwLock<Equipment>,
 }
 
 impl Player {
@@ -408,6 +419,10 @@ impl Player {
             run_energy: RwLock::new(100),
             running: RwLock::new(false),
             last_activity: AtomicU64::new(0),
+            bank: RwLock::new(Bank::new()),
+            bank_open: RwLock::new(false),
+            inventory: RwLock::new(Inventory::new()),
+            equipment: RwLock::new(Equipment::new()),
         }
     }
 
@@ -454,10 +469,47 @@ impl Player {
             data.position.z as u8,
         );
 
+        // Convert inventory from persistence format
+        let inventory_items: Vec<Option<(i32, i32)>> = data
+            .inventory
+            .iter()
+            .map(|opt| opt.map(|item| (item.id, item.amount)))
+            .collect();
+        let inventory = Inventory::from_items(&inventory_items);
+
+        // Convert bank from persistence format
+        // Persistence stores bank as a flat Vec<Option<Item>> (496 slots)
+        // We need to load items into tab 0 (main tab) of the Bank
+        let mut bank = Bank::new();
+        for (_slot, item_opt) in data.bank.iter().enumerate() {
+            if let Some(item) = item_opt {
+                if item.id > 0 && item.amount > 0 {
+                    // Add items to the first tab (tab 0)
+                    // The deposit method handles finding existing stacks
+                    let _ = bank.deposit(item.id as u16, item.amount as u32, Some(0));
+                }
+            }
+        }
+
+        // Convert equipment from persistence format
+        // Persistence stores equipment as Vec<Option<Item>> (14 slots)
+        let equipment_items: Vec<(usize, u16, u32)> = data
+            .equipment
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, item_opt)| {
+                item_opt.map(|item| (slot, item.id as u16, item.amount as u32))
+            })
+            .collect();
+        let equipment = Equipment::from_persistence_format(&equipment_items);
+
         debug!(
             index = index,
             username = %data.display_name,
             location = %location,
+            inventory_items = inventory.item_count(),
+            bank_items = bank.total_items(),
+            equipment_items = equipment.count(),
             "Created player from persisted data"
         );
 
@@ -476,6 +528,10 @@ impl Player {
             run_energy: RwLock::new((data.run_energy / 100).min(100) as u8),
             running: RwLock::new(false),
             last_activity: AtomicU64::new(0),
+            bank: RwLock::new(bank),
+            bank_open: RwLock::new(false),
+            inventory: RwLock::new(inventory),
+            equipment: RwLock::new(equipment),
         }
     }
 
@@ -484,6 +540,9 @@ impl Player {
         let location = self.location.read();
         let appearance = self.appearance.read();
         let skills = self.skills.read();
+        let inventory = self.inventory.read();
+        let bank = self.bank.read();
+        let equipment = self.equipment.read();
 
         // Convert appearance (player uses u16, persistence uses u8 for body parts)
         let persist_appearance = PersistenceAppearance {
@@ -515,6 +574,42 @@ impl Player {
         let total_xp: i64 = persist_skills.iter().map(|s| s.xp as i64).sum();
         let combat_level = skills.combat_level() as i16;
 
+        // Convert bank to persistence format
+        // Bank uses tab-based storage, persistence uses flat Vec<Option<Item>> (496 slots)
+        // We flatten all tabs into a single array, preserving slot positions within each tab
+        let mut persist_bank: Vec<Option<crate::game::persistence::Item>> = vec![None; 496];
+        let mut flat_slot = 0usize;
+        for tab in &bank.tabs {
+            for item in &tab.items {
+                if flat_slot < 496 {
+                    if item.item_id > 0 && item.amount > 0 {
+                        persist_bank[flat_slot] = Some(crate::game::persistence::Item::new(
+                            item.item_id as i32,
+                            item.amount as i32,
+                        ));
+                    }
+                    flat_slot += 1;
+                }
+            }
+        }
+
+        // Convert equipment to persistence format
+        // Equipment has 14 slots, matching persistence format
+        let persist_equipment: Vec<Option<crate::game::persistence::Item>> = equipment
+            .as_slice()
+            .iter()
+            .map(|equip_item| {
+                if equip_item.has_item() {
+                    Some(crate::game::persistence::Item::new(
+                        equip_item.item_id as i32,
+                        equip_item.amount as i32,
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
         PlayerData {
             id: player_id,
             user_id,
@@ -527,10 +622,23 @@ impl Player {
             special_energy: 1000, // TODO: Track special energy
             appearance: persist_appearance,
             skills: persist_skills,
-            inventory: vec![None; 28], // TODO: Track inventory
-            bank: vec![None; 496],     // TODO: Track bank
-            equipment: vec![None; 14], // TODO: Track equipment
-            time_played: 0,            // TODO: Track time played
+            inventory: inventory
+                .as_slice()
+                .iter()
+                .map(|item| {
+                    if item.is_valid() {
+                        Some(crate::game::persistence::Item::new(
+                            item.item_id as i32,
+                            item.amount as i32,
+                        ))
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
+            bank: persist_bank,
+            equipment: persist_equipment,
+            time_played: 0, // TODO: Track time played
             last_saved: None,
         }
     }
@@ -869,5 +977,273 @@ mod tests {
         let result = manager.register(2, "TestPlayer".to_string());
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_player_to_player_data_with_inventory() {
+        let player = Player::new(1, 100, "TestPlayer".to_string());
+
+        // Add items to inventory
+        {
+            let mut inv = player.inventory.write();
+            inv.add(995, 1000, true).unwrap(); // Coins (stackable)
+            inv.add(1511, 50, true).unwrap(); // Buckets (stackable for test)
+        }
+
+        let player_data = player.to_player_data(uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
+
+        // Check inventory was converted
+        let inv_items: Vec<_> = player_data
+            .inventory
+            .iter()
+            .filter_map(|opt| opt.as_ref())
+            .collect();
+        assert_eq!(inv_items.len(), 2);
+        assert_eq!(inv_items[0].id, 995);
+        assert_eq!(inv_items[0].amount, 1000);
+    }
+
+    #[test]
+    fn test_player_to_player_data_with_bank() {
+        let player = Player::new(1, 100, "TestPlayer".to_string());
+
+        // Add items to bank
+        {
+            let mut bank = player.bank.write();
+            bank.deposit(995, 5000, Some(0)).unwrap(); // Coins
+            bank.deposit(1511, 100, Some(0)).unwrap(); // Buckets
+            bank.deposit(440, 250, Some(0)).unwrap(); // Rune essence
+        }
+
+        let player_data = player.to_player_data(uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
+
+        // Check bank was converted
+        let bank_items: Vec<_> = player_data
+            .bank
+            .iter()
+            .filter_map(|opt| opt.as_ref())
+            .collect();
+        assert_eq!(bank_items.len(), 3);
+
+        // Verify items exist (order may vary due to deposit stacking behavior)
+        let has_coins = bank_items.iter().any(|i| i.id == 995 && i.amount == 5000);
+        let has_buckets = bank_items.iter().any(|i| i.id == 1511 && i.amount == 100);
+        let has_essence = bank_items.iter().any(|i| i.id == 440 && i.amount == 250);
+        assert!(has_coins, "Should have 5000 coins");
+        assert!(has_buckets, "Should have 100 buckets");
+        assert!(has_essence, "Should have 250 rune essence");
+    }
+
+    #[test]
+    fn test_player_to_player_data_with_equipment() {
+        use crate::game::equipment::{slot_index, EquipmentItem};
+
+        let player = Player::new(1, 100, "TestPlayer".to_string());
+
+        // Add equipment using get_mut
+        {
+            let mut equipment = player.equipment.write();
+            if let Some(slot) = equipment.get_mut(slot_index::WEAPON) {
+                *slot = EquipmentItem::new(1277, 1); // Dragon dagger
+            }
+            if let Some(slot) = equipment.get_mut(slot_index::BODY) {
+                *slot = EquipmentItem::new(1127, 1); // Rune platebody
+            }
+            if let Some(slot) = equipment.get_mut(slot_index::LEGS) {
+                *slot = EquipmentItem::new(1079, 1); // Rune platelegs
+            }
+        }
+
+        let player_data = player.to_player_data(uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
+
+        // Check equipment was converted
+        assert!(player_data.equipment[slot_index::WEAPON].is_some());
+        assert!(player_data.equipment[slot_index::BODY].is_some());
+        assert!(player_data.equipment[slot_index::LEGS].is_some());
+
+        let weapon = player_data.equipment[slot_index::WEAPON].as_ref().unwrap();
+        assert_eq!(weapon.id, 1277);
+        assert_eq!(weapon.amount, 1);
+    }
+
+    #[test]
+    fn test_player_from_player_data_loads_bank() {
+        use crate::game::persistence::{
+            Appearance as PersistAppearance, Item, PlayerData, Position, Skill,
+        };
+
+        // Create PlayerData with bank items
+        let mut player_data = PlayerData {
+            id: uuid::Uuid::new_v4(),
+            user_id: uuid::Uuid::new_v4(),
+            display_name: "BankTest".to_string(),
+            position: Position::default_spawn(),
+            combat_level: 3,
+            total_level: 35,
+            total_xp: 1154,
+            run_energy: 10000,
+            special_energy: 1000,
+            appearance: PersistAppearance::default(),
+            skills: (0..=24).map(Skill::new).collect(),
+            inventory: vec![None; 28],
+            bank: vec![None; 496],
+            equipment: vec![None; 14],
+            time_played: 0,
+            last_saved: None,
+        };
+
+        // Add items to bank
+        player_data.bank[0] = Some(Item::new(995, 10000)); // Coins
+        player_data.bank[1] = Some(Item::new(1511, 200)); // Buckets
+        player_data.bank[2] = Some(Item::new(440, 500)); // Rune essence
+
+        // Create player from data
+        let player = Player::from_player_data(1, 100, &player_data, PlayerRights::Normal, false);
+
+        // Verify bank was loaded
+        let bank = player.bank.read();
+        assert_eq!(bank.total_items(), 3);
+        assert!(bank.find_item(995).is_some());
+        assert!(bank.find_item(1511).is_some());
+        assert!(bank.find_item(440).is_some());
+    }
+
+    #[test]
+    fn test_player_from_player_data_loads_equipment() {
+        use crate::game::equipment::slot_index;
+        use crate::game::persistence::{
+            Appearance as PersistAppearance, Item, PlayerData, Position, Skill,
+        };
+
+        // Create PlayerData with equipment
+        let mut player_data = PlayerData {
+            id: uuid::Uuid::new_v4(),
+            user_id: uuid::Uuid::new_v4(),
+            display_name: "EquipTest".to_string(),
+            position: Position::default_spawn(),
+            combat_level: 3,
+            total_level: 35,
+            total_xp: 1154,
+            run_energy: 10000,
+            special_energy: 1000,
+            appearance: PersistAppearance::default(),
+            skills: (0..=24).map(Skill::new).collect(),
+            inventory: vec![None; 28],
+            bank: vec![None; 496],
+            equipment: vec![None; 14],
+            time_played: 0,
+            last_saved: None,
+        };
+
+        // Add equipment
+        player_data.equipment[slot_index::WEAPON] = Some(Item::new(1277, 1)); // Dragon dagger
+        player_data.equipment[slot_index::BODY] = Some(Item::new(1127, 1)); // Rune platebody
+        player_data.equipment[slot_index::SHIELD] = Some(Item::new(1201, 1)); // Rune kiteshield
+
+        // Create player from data
+        let player = Player::from_player_data(1, 100, &player_data, PlayerRights::Normal, false);
+
+        // Verify equipment was loaded
+        let equipment = player.equipment.read();
+        assert_eq!(equipment.count(), 3);
+
+        let weapon = equipment.get(slot_index::WEAPON);
+        assert!(weapon.is_some());
+        assert_eq!(weapon.unwrap().item_id, 1277);
+
+        let body = equipment.get(slot_index::BODY);
+        assert!(body.is_some());
+        assert_eq!(body.unwrap().item_id, 1127);
+    }
+
+    #[test]
+    fn test_player_persistence_full_roundtrip() {
+        use crate::game::equipment::{slot_index, EquipmentItem};
+
+        // Create a player with items in all containers
+        let player = Player::new(1, 100, "RoundtripTest".to_string());
+
+        // Add inventory items
+        {
+            let mut inv = player.inventory.write();
+            inv.add(995, 5000, true).unwrap(); // Coins (stackable)
+            inv.add(1511, 25, true).unwrap(); // Buckets (stackable for test)
+        }
+
+        // Add bank items
+        {
+            let mut bank = player.bank.write();
+            bank.deposit(995, 100000, Some(0)).unwrap();
+            bank.deposit(440, 1000, Some(0)).unwrap();
+        }
+
+        // Add equipment using get_mut
+        {
+            let mut equipment = player.equipment.write();
+            if let Some(slot) = equipment.get_mut(slot_index::WEAPON) {
+                *slot = EquipmentItem::new(1277, 1);
+            }
+            if let Some(slot) = equipment.get_mut(slot_index::HEAD) {
+                *slot = EquipmentItem::new(1163, 1); // Rune full helm
+            }
+        }
+
+        // Convert to PlayerData
+        let player_id = uuid::Uuid::new_v4();
+        let user_id = uuid::Uuid::new_v4();
+        let player_data = player.to_player_data(player_id, user_id);
+
+        // Create new player from PlayerData
+        let player2 = Player::from_player_data(2, 200, &player_data, PlayerRights::Normal, false);
+
+        // Verify inventory
+        {
+            let inv = player2.inventory.read();
+            assert_eq!(inv.item_count(), 2);
+            assert!(inv.find_item(995).is_some());
+            assert!(inv.find_item(1511).is_some());
+        }
+
+        // Verify bank
+        {
+            let bank = player2.bank.read();
+            assert_eq!(bank.total_items(), 2);
+            assert!(bank.find_item(995).is_some());
+            assert!(bank.find_item(440).is_some());
+        }
+
+        // Verify equipment
+        {
+            let equipment = player2.equipment.read();
+            assert_eq!(equipment.count(), 2);
+            assert!(equipment.get(slot_index::WEAPON).is_some());
+            assert!(equipment.get(slot_index::HEAD).is_some());
+        }
+    }
+
+    #[test]
+    fn test_player_empty_containers_persistence() {
+        // Create a player with no items
+        let player = Player::new(1, 100, "EmptyTest".to_string());
+
+        // Convert to PlayerData
+        let player_data = player.to_player_data(uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
+
+        // All containers should be empty or None
+        let inv_count = player_data.inventory.iter().filter(|i| i.is_some()).count();
+        let bank_count = player_data.bank.iter().filter(|i| i.is_some()).count();
+        let equip_count = player_data.equipment.iter().filter(|i| i.is_some()).count();
+
+        assert_eq!(inv_count, 0, "Inventory should be empty");
+        assert_eq!(bank_count, 0, "Bank should be empty");
+        assert_eq!(equip_count, 0, "Equipment should be empty");
+
+        // Load from empty PlayerData
+        let player2 = Player::from_player_data(2, 200, &player_data, PlayerRights::Normal, false);
+
+        // Verify containers are empty
+        assert_eq!(player2.inventory.read().item_count(), 0);
+        assert_eq!(player2.bank.read().total_items(), 0);
+        assert_eq!(player2.equipment.read().count(), 0);
     }
 }

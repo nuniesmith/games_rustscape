@@ -51,6 +51,10 @@ pub struct ServerConfig {
     #[serde(default = "default_tick_rate")]
     pub tick_rate_ms: u64,
 
+    /// Autosave interval in seconds (0 to disable)
+    #[serde(default = "default_autosave_interval")]
+    pub autosave_interval_secs: u64,
+
     /// Database configuration
     #[serde(default)]
     pub database: DatabaseConfig,
@@ -157,6 +161,10 @@ fn default_tick_rate() -> u64 {
     600 // 600ms = standard RS tick rate
 }
 
+fn default_autosave_interval() -> u64 {
+    300 // 5 minutes = 300 seconds
+}
+
 fn default_true() -> bool {
     true
 }
@@ -236,6 +244,7 @@ impl Default for ServerConfig {
             data_path: default_data_path(),
             max_players: default_max_players(),
             tick_rate_ms: default_tick_rate(),
+            autosave_interval_secs: default_autosave_interval(),
             database: DatabaseConfig::default(),
             rsa: RsaConfig::default(),
             dev_mode: false,
@@ -430,6 +439,7 @@ mod tests {
         assert_eq!(config.game_port, 43594);
         assert_eq!(config.websocket_port, 43596);
         assert_eq!(config.tick_rate_ms, 600);
+        assert_eq!(config.autosave_interval_secs, 300);
     }
 
     #[test]

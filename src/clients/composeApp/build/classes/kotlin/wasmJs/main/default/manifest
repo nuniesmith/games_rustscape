@@ -1,0 +1,11 @@
+abi_version=1.201.0
+builtins_platform=WASM
+compiler_version=2.1.0
+depends=com.rustscape\:shared components.resources\:library components.ui-tooling-preview\:library org.jetbrains.compose.material3\:material3 org.jetbrains.compose.material\:material-ripple org.jetbrains.compose.foundation\:foundation org.jetbrains.compose.animation\:animation org.jetbrains.compose.animation\:animation-core org.jetbrains.kotlinx\:kotlinx-coroutines-core org.jetbrains.compose.material\:material-icons-core org.jetbrains.compose.foundation\:foundation-layout org.jetbrains.compose.ui\:ui org.jetbrains.kotlinx\:kotlinx-browser org.jetbrains.compose.runtime\:runtime-saveable kotlin org.jetbrains.compose.runtime\:runtime org.jetbrains.compose.ui\:ui-text org.jetbrains.compose.ui\:ui-graphics org.jetbrains.compose.ui\:ui-unit org.jetbrains.kotlinx\:atomicfu org.jetbrains.skiko\:skiko org.jetbrains.compose.ui\:ui-geometry org.jetbrains.compose.ui\:ui-util
+ir_signature_versions=1,2
+jsOutputName=rustscape-client-composeApp-wasm-js
+metadata_version=1.4.1
+serializedIrFileFingerprints=343k6f6hlwjjr.190daelaubyht 31cdv7k21hpqi.j3qrrwjmwm5j 2i8u86aa324tt.jjld77gtj2qm rzto1n3jo763.kyv9zho4qbhw 3e90l1whk8d2v.2g5s208t8a16 t6np739xqe8p.3mg709q28u30b 2yu2kpgiap3vg.1kqea1jcwgasl ik2q9fpwoc3r.3fapvjg4aifdb 1c37ftpfrzvum.39p9ze1u9sxmf 1h9yoqrd6zqw9.2r5tjp50sv0xz 2dx0uboxnsdoq.15cwjtamowmwr 1z8ocuhpzfrbp.3l2sagp9l5c8f 377o50dqf1bkh.3dpu9aj011zb7 2per47jmounuz.250zkvk7wa61m j5uesf25sd5b.bt21286fsbho 1f4zph5ckp46w.135kqlpj13dzg 11s5p5eq7khex.6tnbnxpjhfo8 1tex0n5nazn74.h18zee5daffx 4kc1wyeqctf3.2cm12du0y27ck faexj7cqdzw7.3j7kt7508wu57 1oyw44d7mmhuh.3q07f3g2xgfze mzib23s7b8y7.1zcr3owqb0qia 1zodbdtcfov7n.3ai2sl6oswtrq 17ztcxfxauog2.1zxaq8tphmwa5 1hwszg8rdjtfo.3scemj6x9o67a 28wfjcsrsld5m.106lt0r9aazoy 2gt6e300pigoy.3k6t3az9nlm69 1oqd2udec869w.8xdrwwo0fw4r 327gwer2r6i24.30gz991cs0lrj 3jhz08b8btoa2.29g5eibtx4vzb 1vpjmxfjnut0l.963n75e2snco 1fveibn4a0j1b.282hoqihoinmn 1hrf141r2aynn.20y5i5al44pok 35xel4klvdetp.2eg0mfj75z9e
+serializedKlibFingerprint=3pzi2aqjf6fe3.17mopj7m2atqk
+unique_name=com.rustscape\:composeApp
+wasm_targets=wasm-js

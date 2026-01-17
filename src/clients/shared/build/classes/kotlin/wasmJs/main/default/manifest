@@ -1,0 +1,11 @@
+abi_version=1.201.0
+builtins_platform=WASM
+compiler_version=2.1.0
+depends=org.jetbrains.kotlinx\:kotlinx-coroutines-core org.jetbrains.kotlinx\:kotlinx-serialization-json org.jetbrains.kotlinx\:kotlinx-datetime org.jetbrains.kotlinx\:kotlinx-serialization-core kotlin org.jetbrains.kotlinx\:atomicfu
+ir_signature_versions=1,2
+jsOutputName=rustscape-client-shared-wasm-js
+metadata_version=1.4.1
+serializedIrFileFingerprints=313dtfk9zmvqu.mj4qr2az9ep4 1zel1fq8v0cv.v7zoncwd1k59 1075kgjozcyjm.2bm3ztne49aks 3lz42oh7f7fih.3inxgigj3bcop 36pzr8doubrv9.2czottv48t6c 1kenot6y6j7to.1gc1ik18ryh93 36iefurway9e2.2btgh66zjru6n 2m7dsi5vkzxz9.35j5u80f94j23
+serializedKlibFingerprint=2khyss8m94rrw.13d3wphinlb76
+unique_name=com.rustscape\:shared
+wasm_targets=wasm-js

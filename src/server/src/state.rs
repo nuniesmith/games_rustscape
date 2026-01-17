@@ -14,7 +14,7 @@ use crate::config::ServerConfig;
 use crate::crypto::RsaDecryptor;
 use crate::error::Result;
 use crate::game::persistence::PlayerPersistence;
-use crate::game::world::GameWorld;
+use crate::game::world::{GameWorld, WorldSettings};
 use crate::net::session::SessionManager;
 
 /// Application state shared across all connections
@@ -41,7 +41,10 @@ impl AppState {
     /// Create a new application state without database persistence
     pub fn new(config: ServerConfig, shutdown_tx: broadcast::Sender<()>) -> Result<Self> {
         let cache = Arc::new(CacheStore::new(&config.cache_path)?);
-        let world = Arc::new(GameWorld::new(config.world_id)?);
+
+        // Create world settings from config
+        let world_settings = Self::create_world_settings(&config);
+        let world = Arc::new(GameWorld::with_settings(world_settings)?);
 
         // Initialize RSA decryptor from config
         let rsa = match RsaDecryptor::from_hex(
@@ -90,7 +93,10 @@ impl AppState {
         db_pool: PgPool,
     ) -> Result<Self> {
         let cache = Arc::new(CacheStore::new(&config.cache_path)?);
-        let world = Arc::new(GameWorld::new(config.world_id)?);
+
+        // Create world settings from config
+        let world_settings = Self::create_world_settings(&config);
+        let world = Arc::new(GameWorld::with_settings(world_settings)?);
 
         // Initialize RSA decryptor from config
         let rsa = match RsaDecryptor::from_hex(
@@ -146,5 +152,34 @@ impl AppState {
     /// Get a reference to the persistence service
     pub fn persistence(&self) -> Option<&Arc<PlayerPersistence>> {
         self.persistence.as_ref()
+    }
+
+    /// Create world settings from server config
+    fn create_world_settings(config: &ServerConfig) -> WorldSettings {
+        // Convert autosave from seconds to ticks
+        // tick_rate_ms is the interval between ticks (default 600ms)
+        let autosave_ticks = if config.autosave_interval_secs > 0 {
+            let ticks_per_second = 1000 / config.tick_rate_ms.max(1);
+            config.autosave_interval_secs * ticks_per_second
+        } else {
+            0 // Disabled
+        };
+
+        info!(
+            autosave_interval_secs = config.autosave_interval_secs,
+            autosave_ticks = autosave_ticks,
+            "Configuring world autosave"
+        );
+
+        WorldSettings {
+            world_id: config.world_id,
+            name: config.server_name.clone(),
+            members: false,
+            pvp: false,
+            dev_mode: config.dev_mode,
+            tick_rate_ms: config.tick_rate_ms,
+            max_players: config.max_players as usize,
+            autosave_interval: autosave_ticks,
+        }
     }
 }

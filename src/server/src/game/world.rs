@@ -449,15 +449,22 @@ impl GameWorld {
     }
 
     /// Autosave all online players
+    ///
+    /// Saves inventory, bank, equipment, skills, and position for all online players.
+    /// For players who don't exist in the database yet, creates them first then saves
+    /// their current game state.
     async fn autosave_players(&self, persistence: &PlayerPersistence) {
         let player_count = self.players.count();
         if player_count == 0 {
+            trace!("No players online, skipping autosave");
             return;
         }
 
+        let start_time = Instant::now();
         info!(player_count = player_count, "Starting periodic autosave");
 
         let mut saved = 0;
+        let mut created = 0;
         let mut failed = 0;
 
         // Collect players to save (we can't hold the iterator across await)
@@ -480,14 +487,21 @@ impl GameWorld {
         for (username, display_name, user_id) in players_to_save {
             // Get the player again (it might have logged out)
             if let Some(player) = self.players.get_by_username(&username) {
-                // Load existing player ID
+                // Load existing player ID or create new player
                 match persistence.load_by_user_id(user_id).await {
                     Ok(Some(existing)) => {
+                        // Existing player - save their current state
                         let player_data = player.to_player_data(existing.id, user_id);
                         match persistence.save(&player_data).await {
                             Ok(_) => {
                                 saved += 1;
-                                debug!(username = %username, "Autosaved player");
+                                trace!(
+                                    username = %username,
+                                    inventory_items = player_data.inventory.iter().filter(|i| i.is_some()).count(),
+                                    bank_items = player_data.bank.iter().filter(|i| i.is_some()).count(),
+                                    equipment_items = player_data.equipment.iter().filter(|i| i.is_some()).count(),
+                                    "Autosaved player"
+                                );
                             }
                             Err(e) => {
                                 failed += 1;
@@ -500,11 +514,33 @@ impl GameWorld {
                         }
                     }
                     Ok(None) => {
-                        // Player doesn't exist in DB yet, create them
-                        match persistence.create_for_user(user_id, display_name).await {
-                            Ok(_) => {
-                                saved += 1;
-                                debug!(username = %username, "Created player during autosave");
+                        // Player doesn't exist in DB yet - create them and save their current state
+                        match persistence
+                            .create_for_user(user_id, display_name.clone())
+                            .await
+                        {
+                            Ok(new_player) => {
+                                // Now save their current game state (inventory, bank, equipment)
+                                let player_data = player.to_player_data(new_player.id, user_id);
+                                match persistence.save(&player_data).await {
+                                    Ok(_) => {
+                                        created += 1;
+                                        debug!(
+                                            username = %username,
+                                            player_id = %new_player.id,
+                                            "Created and saved new player during autosave"
+                                        );
+                                    }
+                                    Err(e) => {
+                                        // Player was created but save failed
+                                        failed += 1;
+                                        error!(
+                                            username = %username,
+                                            error = %e,
+                                            "Created player but failed to save state"
+                                        );
+                                    }
+                                }
                             }
                             Err(e) => {
                                 failed += 1;
@@ -528,7 +564,14 @@ impl GameWorld {
             }
         }
 
-        info!(saved = saved, failed = failed, "Autosave complete");
+        let elapsed = start_time.elapsed();
+        info!(
+            saved = saved,
+            created = created,
+            failed = failed,
+            elapsed_ms = elapsed.as_millis() as u64,
+            "Autosave complete"
+        );
     }
 
     /// Broadcast a message to all players

@@ -8,6 +8,11 @@
 //! - Combat and skills (future)
 //! - Player synchronization (multiplayer updates)
 
+pub mod bank;
+pub mod equipment;
+pub mod ground_item;
+pub mod inventory;
+pub mod item;
 pub mod persistence;
 pub mod player;
 pub mod sync;
